@@ -1,0 +1,158 @@
+# Continuous integration on GitHub-hosted runners. These runners have no GPU, so CI checks
+# everything that does not need one:
+#
+#   python  CPU reference and fixture tests on the oldest and newest supported Python, and (on
+#           the newest) a check that tools/gen_fixtures.py still reproduces the committed
+#           fixtures byte for byte. tests/test_pipeline.py skips itself: there is no rfgpu.
+#   cuda    rfgpu compiles with CUDA 13.4 and GCC 15 (the development machine's toolchain) for
+#           the RTX 5080 and for Jetson Orin and Thor, with every warning treated as an error.
+#   sigflowc  the SigFlow compiler (compiler/) builds with warnings as errors and passes its
+#           GoogleTest unit tests and golden tests (ctest). It needs no GPU.
+#   fuzz    a libFuzzer target over the whole compiler (compiler/fuzz/) runs for 60 seconds
+#           with AddressSanitizer and UndefinedBehaviorSanitizer.
+#   viewer  the DAG viewer (compiler/viewer/) type-checks and passes its node:test suites,
+#           which read the compiler's golden JSON.
+#
+# The GPU tests (tests/test_pipeline.py and compiler/tests/e2e) still have to be run locally
+# before each commit.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.14"]  # oldest supported (AGENTS.md) and the development machine's
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the CPU tests
+        run: pytest -q -rs tests/
+
+      # Only on the newest Python: the fixtures were generated with its NumPy and SciPy, and an
+      # older SciPy may design the filter taps differently in the last bit.
+      - name: Check that the committed fixtures are reproducible
+        if: matrix.python == '3.14'
+        run: |
+          python tools/gen_fixtures.py --out "$RUNNER_TEMP/fixtures"
+          diff -r tests/fixtures "$RUNNER_TEMP/fixtures"
+
+  cuda:
+    name: Build rfgpu (CUDA 13.4)
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:13.4.3-devel-ubuntu26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake g++ make
+
+      # No GPU to detect, so the architectures are given explicitly: compute capability 12.0 is
+      # the RTX 5080 Laptop GPU the measurements come from, 8.7 and 11.0 are Jetson Orin and
+      # Thor (docs/JETSON.md).
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CUDA_ARCHITECTURES="87;110;120"
+          -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      # --help needs no GPU, so it at least shows the binary links and starts.
+      - name: Smoke test
+        run: ./build/rfgpu --help
+
+  sigflowc:
+    name: sigflowc unit and golden tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S compiler -B compiler/build -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+      - name: Build
+        run: cmake --build compiler/build -j
+
+      - name: Test
+        run: ctest --test-dir compiler/build --output-on-failure
+
+  fuzz:
+    name: sigflowc fuzzing (60 s)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          CXX=clang++ cmake -S compiler -B compiler/build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DSIGFLOWC_FUZZ=ON -DSIGFLOWC_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build compiler/build-fuzz -j
+
+      # A fresh copy of the seed corpus, so new inputs stay out of the checkout. Any crash,
+      # sanitizer report, or timeout fails the job and leaves the input as an artifact.
+      - name: Fuzz
+        run: |
+          mkdir -p "$RUNNER_TEMP/corpus" "$RUNNER_TEMP/crashes"
+          cp compiler/fuzz/corpus/* "$RUNNER_TEMP/corpus/"
+          compiler/build-fuzz/fuzz_sigflow -max_total_time=60 -max_len=4096 -timeout=10 \
+            -dict=compiler/fuzz/sigflow.dict -artifact_prefix="$RUNNER_TEMP/crashes/" \
+            "$RUNNER_TEMP/corpus"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crashes
+          path: ${{ runner.temp }}/crashes
+
+  viewer:
+    name: DAG viewer tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: compiler/viewer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: compiler/viewer/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and test
+        run: npm test

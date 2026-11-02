@@ -1,0 +1,15 @@
+# Build outputs
+build/
+out/
+compiler/fixtures
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Large or intermediate profiler files (keep small reports and screenshots)
+*.qdstrm
+*.sqlite
+node_modules/
+compiler/viewer/dist/
