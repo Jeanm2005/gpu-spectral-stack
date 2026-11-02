@@ -35,33 +35,33 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
-extension:
-  name: PyTorch extension (CUDA 13.4, torch cu130)
-  runs-on: ubuntu-24.04
-  container: nvidia/cuda:13.4.3-devel-ubuntu26.04
-  env:
-    TORCH_CUDA_ARCH_LIST: "12.0"
-  steps:
-    - uses: actions/checkout@v4
+  extension:
+    name: PyTorch extension (CUDA 13.4, torch cu130)
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:13.4.3-devel-ubuntu26.04
+    env:
+      TORCH_CUDA_ARCH_LIST: "12.0"
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Install Python and build tools
-      run: |
-        apt-get update
-        apt-get install -y --no-install-recommends python3 python3-venv python3-dev g++
+      - name: Install Python and build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-venv python3-dev g++
 
-    - name: Create the virtual environment
-      run: |
-        python3 -m venv /opt/venv
-        echo "/opt/venv/bin" >> "$GITHUB_PATH"
+      - name: Create the virtual environment
+        run: |
+          python3 -m venv /opt/venv
+          echo "/opt/venv/bin" >> "$GITHUB_PATH"
 
-    - name: Install dependencies
-      run: |
-        pip install --upgrade pip
-        pip install torch --index-url https://download.pytorch.org/whl/cu130
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cu130
+          pip install -r requirements.txt
 
-    - name: Build and install the extension
-      run: pip install -e . --no-build-isolation
+      - name: Build and install the extension
+        run: pip install -e . --no-build-isolation
 
-    - name: Run the tests (GPU tests skip)
-      run: pytest -q -rs
+      - name: Run the tests (GPU tests skip)
+        run: pytest -q -rs
