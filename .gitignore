@@ -1,15 +1,20 @@
 # Build outputs
 build/
 out/
-compiler/fixtures
+*.so
+*.egg-info/
 
 # Python
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
 
-# Large or intermediate profiler files (keep small reports and screenshots)
+# Data and experiment tracking (DVC and MLflow manage these from Phase 2)
+data/
+mlruns/
+mlartifacts/
+
+# Large or intermediate profiler files (small .ncu-rep reports are committed)
 *.qdstrm
 *.sqlite
-node_modules/
-compiler/viewer/dist/
