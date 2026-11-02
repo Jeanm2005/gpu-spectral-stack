@@ -33,6 +33,7 @@ set(SPECTRAL_COMPILE_OPTIONS
 # the PyTorch extension (0.2) compiles the same sources.
 add_library(spectral_core STATIC
   csrc/common/bench.cpp
+  csrc/ops/scale.cu
 )
 target_include_directories(spectral_core PUBLIC csrc)
 target_link_libraries(spectral_core PUBLIC CUDA::cudart CUDA::cufft)

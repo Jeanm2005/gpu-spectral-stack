@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=77", "wheel", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpu-spectral-stack"
+version = "0.1.0"
+description = "FFT kernels in CUDA, a GPU spectral PDE solver, and a custom FNO layer"
+requires-python = ">=3.10"
+dependencies = ["torch", "numpy"]
+
+[tool.setuptools]
+package-dir = { "" = "python" }
+packages = ["spectral"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
