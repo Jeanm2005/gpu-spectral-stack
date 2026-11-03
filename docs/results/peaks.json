@@ -1,0 +1,6 @@
+{
+  "device": "NVIDIA GeForce RTX 5080 Laptop GPU",
+  "peak_bandwidth_gbps": 515.4,
+  "peak_fp32_gflops": 26422.1,
+  "ridge_flop_per_byte": 51.27
+}

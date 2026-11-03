@@ -48,3 +48,8 @@ target_compile_options(spectral_smoke PRIVATE ${SPECTRAL_COMPILE_OPTIONS})
 add_executable(spectral_bench csrc/tools/spectral_bench.cpp)
 target_link_libraries(spectral_bench PRIVATE spectral_core)
 target_compile_options(spectral_bench PRIVATE ${SPECTRAL_COMPILE_OPTIONS})
+
+# Measures this GPU's achievable bandwidth and FP32 throughput: the roofline's two ceilings.
+add_executable(spectral_peaks csrc/tools/peaks.cu)
+target_link_libraries(spectral_peaks PRIVATE spectral_core)
+target_compile_options(spectral_peaks PRIVATE ${SPECTRAL_COMPILE_OPTIONS})

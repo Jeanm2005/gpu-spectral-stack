@@ -1,33 +1,24 @@
-# gpu-spectral-stack
+# Results
 
-FFT kernels written from scratch in CUDA, a GPU pseudo-spectral physics solver built on them
-that generates versioned training data, and a custom PyTorch spectral-convolution layer for a
-Fourier Neural Operator.
+Committed baselines and measured ceilings. Every figure in docs/figures/ is drawn from these
+files by `python tools/make_figures.py`.
 
-Builds on [gpu-rf-pipeline](https://github.com/Jeanm2005/gpu-rf-pipeline), which provides the
-radio signal-processing side. Status and plan: [docs/ROADMAP.md](docs/ROADMAP.md).
+| File | Contents | Produced by |
+|---|---|---|
+| `bench.csv` | median time, GFLOP/s, and effective GB/s of every C++ implementation | `./build/spectral_bench --out docs/results/bench.csv` |
+| `bench_torch.csv` | the same for torch.fft, to show PyTorch's overhead over raw cuFFT | `python bench/bench_torch.py --out docs/results/bench_torch.csv` |
+| `peaks.json` | achievable DRAM bandwidth and FP32 throughput: the roofline's ceilings | `./build/spectral_peaks --out docs/results/peaks.json` |
 
-## Requirements
+## Machine and conditions
 
-Linux or WSL2, an NVIDIA GPU, CUDA Toolkit 13.x, CMake 3.24 or newer, a C++17 compiler, and
-Python 3.10 or newer with its development headers.
+NVIDIA GeForce RTX 5080 Laptop GPU (compute capability 12.0, 60 SMs, 16 GB GDDR7), CUDA 13.4,
+WSL2 on Windows. Laptop plugged in, Windows power mode "Best performance", vendor profile set
+to Performance. Conditions for comparable runs are in docs/DEVELOPMENT.md.
 
-## Build
+## Measured bandwidth versus the datasheet
 
-C++ library and tools:
-
-```bash
-cmake -S . -B build
-cmake --build build -j
-./build/spectral_smoke
-```
-
-Python package (PyTorch extension):
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install torch --index-url https://download.pytorch.org/whl/cu130
-pip install -r requirements.txt
-pip install -e . --no-build-isolation
-pytest -q -rs
-```
+The measured copy bandwidth is about 520 GB/s, against 896 GB/s on the datasheet (256-bit bus
+at 28 Gbps). PyTorch's own device-to-device copy reaches the same 520 GB/s on this machine, and
+the number does not change with power settings, so it is what this laptop sustains under WSL2,
+not a limit of the measurement kernel. All percentages of peak in this repository are relative
+to the measured value, which is the honest ceiling for kernels running on this machine.

@@ -12,16 +12,16 @@ Conventions
 
 ## Phase 0: Foundations (Nov 2–15)
 
-- [ ] 0.1 Build skeleton: CMake, `spectral_core` library, toolchain smoke test, CI build job
-- [ ] 0.2 PyTorch extension: `spectral._C` built with torch.utils.cpp_extension, pyproject.toml,
+- [X] 0.1 Build skeleton: CMake, `spectral_core` library, toolchain smoke test, CI build job
+- [X] 0.2 PyTorch extension: `spectral._C` built with torch.utils.cpp_extension, pyproject.toml,
       one smoke op callable from Python. CI: build the extension in the CUDA container
-- [ ] 0.3 Correctness harness: float64 NumPy reference (fft, ifft, rfft, irfft, fft2, rfft2,
+- [X] 0.3 Correctness harness: float64 NumPy reference (fft, ifft, rfft, irfft, fft2, rfft2,
       pruned variants), tolerance policy that scales with log2 N, pytest size/batch matrix,
       GPU tests skip without a GPU, `tools/check_local.sh`. CI: ruff lint + CPU tests
-- [ ] 0.4 Benchmark harness: Bench reports GFLOP/s (5 N log2 N convention) and GB/s,
+- [X] 0.4 Benchmark harness: Bench reports GFLOP/s (5 N log2 N convention) and GB/s,
       `spectral_bench` CLI writing JSON/CSV, Python-side timing with torch.cuda.Event,
       results in docs/results/. Local regression check against the committed CSV
-- [ ] 0.5 Roofline tooling: measured peak bandwidth (copy kernel) and peak FP32 (FMA kernel),
+- [X] 0.5 Roofline tooling: measured peak bandwidth (copy kernel) and peak FP32 (FMA kernel),
       Nsight Compute script, roofline plot, DEVELOPMENT.md trimmed to this repo
 
 ## Phase 1: FFT kernels (Nov 16 – early Jan)
