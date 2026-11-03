@@ -1,6 +1,10 @@
+# Development dependencies. PyTorch is installed separately, because its CUDA build comes from
+# its own package index:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu130
 numpy
 scipy
 pytest
+ruff
 ninja
 setuptools>=77
 wheel

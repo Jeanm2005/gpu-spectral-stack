@@ -14,6 +14,29 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint (ruff, actionlint)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: actionlint
+        run: |
+          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
   cuda:
     name: Build (CUDA 13.4)
     runs-on: ubuntu-24.04
@@ -40,7 +63,7 @@ jobs:
     runs-on: ubuntu-24.04
     container: nvidia/cuda:13.4.3-devel-ubuntu26.04
     env:
-      TORCH_CUDA_ARCH_LIST: "12.0"
+      TORCH_CUDA_ARCH_LIST: "12.0"  # no GPU to detect, so name the target explicitly
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +72,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends python3 python3-venv python3-dev g++
 
+      # Each step runs in a new shell, so the venv goes on PATH instead of being activated.
       - name: Create the virtual environment
         run: |
           python3 -m venv /opt/venv
@@ -64,4 +88,4 @@ jobs:
         run: pip install -e . --no-build-isolation
 
       - name: Run the tests (GPU tests skip)
-        run: pytest -q -rs
+        run: pytest -q

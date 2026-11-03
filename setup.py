@@ -1,5 +1,7 @@
 """Builds the spectral._C extension: csrc/torch bindings plus the CUDA kernels they launch."""
+
 from pathlib import Path
+
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 

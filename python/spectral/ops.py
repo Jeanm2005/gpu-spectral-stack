@@ -1,5 +1,6 @@
 import torch
 
+
 def scale(x: torch.Tensor, alpha: float) -> torch.Tensor:
     """Returns alpha * x, computed by our own CUDA kernel.
 

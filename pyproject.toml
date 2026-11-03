@@ -15,3 +15,15 @@ packages = ["spectral"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["gpu: needs a CUDA GPU; skipped automatically when none is visible"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["python", "tests"]
+# Imported from gpu-rf-pipeline; rewritten for this repository in Tasks 0.4 and 0.5.
+extend-exclude = ["tools/make_figures.py"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "NPY"]
