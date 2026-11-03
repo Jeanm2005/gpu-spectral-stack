@@ -1,0 +1,16 @@
+# device: NVIDIA GeForce RTX 5080 Laptop GPU
+# torch 2.14.1+cu130, CUDA 13.0
+# timing: 3 warm-up launches, then the median over 5 rounds of 20 launches; time_ms is per launch
+op,impl,n,batch,time_ms,min_ms,gflops,gbps
+fft_c2c,torch,2,8388608,0.518942,0.515040,161.6,517.3
+fft_c2c,torch,4,4194304,0.583282,0.573838,287.6,460.2
+fft_c2c,torch,8,2097152,0.586186,0.583571,429.3,457.9
+fft_c2c,torch,16,1048576,0.597346,0.584093,561.7,449.4
+fft_c2c,torch,32,524288,0.587618,0.574853,713.8,456.8
+fft_c2c,torch,64,262144,0.579842,0.574928,868.0,462.9
+fft_c2c,torch,128,131072,0.591310,0.575733,993.1,454.0
+fft_c2c,torch,256,65536,0.588782,0.574682,1139.8,455.9
+fft_c2c,torch,512,32768,0.591323,0.577690,1276.8,454.0
+fft_c2c,torch,1024,16384,0.587146,0.580235,1428.7,457.2
+fft_c2c,torch,2048,8192,0.917138,0.619757,1006.1,292.7
+fft_c2c,torch,4096,4096,1.522645,1.440776,661.1,176.3

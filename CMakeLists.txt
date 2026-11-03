@@ -29,8 +29,8 @@ set(SPECTRAL_COMPILE_OPTIONS
   $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
 )
 
-# The kernels and host helpers. The FFT kernels (csrc/fft/) join this library in Phase 1;
-# the PyTorch extension (0.2) compiles the same sources.
+# The kernels and host helpers, with no PyTorch dependency. The FFT kernels (csrc/fft/) join
+# this library in Phase 1; setup.py compiles the same kernel sources into the PyTorch extension.
 add_library(spectral_core STATIC
   csrc/common/bench.cpp
   csrc/ops/scale.cu
@@ -43,3 +43,8 @@ target_compile_options(spectral_core PRIVATE ${SPECTRAL_COMPILE_OPTIONS})
 add_executable(spectral_smoke csrc/tools/smoke.cu)
 target_link_libraries(spectral_smoke PRIVATE spectral_core)
 target_compile_options(spectral_smoke PRIVATE ${SPECTRAL_COMPILE_OPTIONS})
+
+# Benchmarks every implementation of every operation and writes CSV (docs/results/).
+add_executable(spectral_bench csrc/tools/spectral_bench.cpp)
+target_link_libraries(spectral_bench PRIVATE spectral_core)
+target_compile_options(spectral_bench PRIVATE ${SPECTRAL_COMPILE_OPTIONS})

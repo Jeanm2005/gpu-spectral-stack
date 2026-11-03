@@ -29,8 +29,11 @@ cmake --build build -j
 step "Toolchain smoke test"
 ./build/spectral_smoke
 
+step "Benchmark smoke run (one tiny row per operation)"
+./build/spectral_bench --sizes 64 --total 65536 --warmup 0 --rounds 1 --iters 1 > /dev/null
+
 step "PyTorch extension"
-pip install -e . --no-build-isolation --quiet
+pip install -e . --no-build-isolation --quiet --disable-pip-version-check
 
 step "Tests, including the GPU tests"
 python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 'no GPU visible')"

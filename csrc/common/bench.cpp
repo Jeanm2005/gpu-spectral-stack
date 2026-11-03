@@ -2,8 +2,10 @@
 
 #include "check.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -23,8 +25,10 @@ public:
     Event(const Event&) = delete;
     Event& operator=(const Event&) = delete;
 
-    // Puts the event in the default stream, behind everything already queued there.
-    void record() { CUDA_CHECK(cudaEventRecord(event_)); }
+    // Places the event in `stream`, behind everything already queued there.
+    void record(cudaStream_t stream) { CUDA_CHECK(cudaEventRecord(event_, stream)); }
+
+    // Blocks until the GPU reaches the event. Reports any error from the work before it.
     void wait() { CUDA_CHECK(cudaEventSynchronize(event_)); }
 
     // Milliseconds from `start` to this event, measured by the GPU.
@@ -39,55 +43,58 @@ private:
     cudaEvent_t event_{};
 };
 
-PhaseTime summarize(const std::vector<double>& samples)
+}  // namespace
+
+Timing time_kernel(const LaunchFn& launch, cudaStream_t stream, const TimingConfig& config)
 {
-    PhaseTime t;
-    if (samples.empty()) {
-        return t;
+    if (config.warmup < 0 || config.rounds < 1 || config.iters < 1) {
+        throw std::invalid_argument("time_kernel: need warmup >= 0, rounds >= 1, iters >= 1");
     }
-    double sum = 0.0;
-    for (double s : samples) {
-        sum += s;
+
+    for (int i = 0; i < config.warmup; ++i) {
+        launch(stream);
     }
-    t.mean_ms = sum / static_cast<double>(samples.size());
-    if (samples.size() > 1) {
-        double sq = 0.0;
-        for (double s : samples) {
-            sq += (s - t.mean_ms) * (s - t.mean_ms);
+    CUDA_CHECK(cudaGetLastError());
+
+    Event start;
+    Event stop;
+    std::vector<double> per_launch;
+    per_launch.reserve(static_cast<std::size_t>(config.rounds));
+    for (int r = 0; r < config.rounds; ++r) {
+        start.record(stream);
+        for (int i = 0; i < config.iters; ++i) {
+            launch(stream);
         }
-        t.std_ms = std::sqrt(sq / static_cast<double>(samples.size() - 1));
+        stop.record(stream);
+        stop.wait();
+        CUDA_CHECK(cudaGetLastError());
+        per_launch.push_back(stop.ms_since(start) / config.iters);
     }
+
+    std::sort(per_launch.begin(), per_launch.end());
+    const std::size_t n = per_launch.size();
+    Timing t;
+    t.min_ms = per_launch.front();
+    t.max_ms = per_launch.back();
+    t.median_ms = n % 2 == 1 ? per_launch[n / 2] : 0.5 * (per_launch[n / 2 - 1] + per_launch[n / 2]);
     return t;
 }
 
-}  // namespace
-
-void Bench::run(const std::function<void()>& upload, const std::function<void()>& compute,
-                const std::function<void()>& download)
+double gflops_per_s(const Work& work, double ms)
 {
-    for (int i = 0; i < config_.warmup; ++i) {
-        upload();
-        compute();
-        download();
-    }
+    return ms > 0.0 ? work.flops / (ms * 1e6) : 0.0;  // flops / (ms * 1e-3 s) / 1e9
+}
 
-    Event start, uploaded, computed, downloaded;
-    std::vector<double> h2d, kernel, d2h;
-    for (int i = 0; i < config_.runs; ++i) {
-        start.record();
-        upload();
-        uploaded.record();
-        compute();
-        computed.record();
-        download();
-        downloaded.record();
-        downloaded.wait();
+double gbytes_per_s(const Work& work, double ms)
+{
+    return ms > 0.0 ? work.bytes / (ms * 1e6) : 0.0;
+}
 
-        h2d.push_back(uploaded.ms_since(start));
-        kernel.push_back(computed.ms_since(uploaded));
-        d2h.push_back(downloaded.ms_since(computed));
-    }
-    result_.h2d = summarize(h2d);
-    result_.kernel = summarize(kernel);
-    result_.d2h = summarize(d2h);
+Work fft_c2c_work(long long n, long long batch)
+{
+    const double points = static_cast<double>(n) * static_cast<double>(batch);
+    Work w;
+    w.flops = 5.0 * points * std::log2(static_cast<double>(n));
+    w.bytes = 2.0 * 8.0 * points;  // one complex64 (8 bytes) read and one written per point
+    return w;
 }
