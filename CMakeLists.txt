@@ -34,6 +34,7 @@ set(SPECTRAL_COMPILE_OPTIONS
 add_library(spectral_core STATIC
   csrc/common/bench.cpp
   csrc/ops/scale.cu
+  csrc/fft/naive.cu
 )
 target_include_directories(spectral_core PUBLIC csrc)
 target_link_libraries(spectral_core PUBLIC CUDA::cudart CUDA::cufft)

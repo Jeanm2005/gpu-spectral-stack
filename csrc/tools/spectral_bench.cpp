@@ -11,6 +11,7 @@
 #include "common/device_buffer.hpp"
 #include "common/fft_plan.hpp"
 #include "common/types.hpp"
+#include "fft/fft.hpp"
 #include "ops/scale.hpp"
 
 #include <algorithm>
@@ -30,6 +31,7 @@ namespace {
 const char* const kUsage =
     "usage: spectral_bench [options]\n"
     "  --op NAME       all (default), fft_c2c, or scale\n"
+    "  --impl NAME     all (default), cufft, naive, or ours (the scale kernel)\n"
     "  --sizes LIST    comma-separated transform sizes (default: 2,4,...,4096)\n"
     "  --total N       points per row; batch = total / n (default: 16777216)\n"
     "  --warmup N      untimed launches (default: 3)\n"
@@ -39,10 +41,13 @@ const char* const kUsage =
 
 struct Options {
     std::string op = "all";
+    std::string impl = "all";
     std::vector<long long> sizes;
     long long total = 1LL << 24;
     TimingConfig timing;
     std::string out;
+
+    bool wants(const char* name) const { return impl == "all" || impl == name; }
 };
 
 [[noreturn]] void usage_error(const std::string& message)
@@ -95,6 +100,8 @@ Options parse_options(int argc, char** argv)
         const std::string value = argv[++i];
         if (flag == "--op") {
             options.op = value;
+        } else if (flag == "--impl") {
+            options.impl = value;
         } else if (flag == "--sizes") {
             options.sizes = parse_sizes(value);
         } else if (flag == "--total") {
@@ -113,6 +120,10 @@ Options parse_options(int argc, char** argv)
     }
     if (options.op != "all" && options.op != "fft_c2c" && options.op != "scale") {
         usage_error("unknown --op " + options.op);
+    }
+    if (options.impl != "all" && options.impl != "cufft" && options.impl != "naive"
+        && options.impl != "ours") {
+        usage_error("unknown --impl " + options.impl);
     }
     if (options.sizes.empty()) {
         for (long long n = 2; n <= 4096; n *= 2) {
@@ -183,17 +194,32 @@ void bench_fft_c2c(const Options& options, const cf32* x, cf32* y, cudaStream_t 
 {
     for (const long long n : options.sizes) {
         const long long batch = std::max(1LL, options.total / n);
-        FftPlan plan(static_cast<int>(n), static_cast<int>(batch));
-        CUFFT_CHECK(cufftSetStream(plan.get(), stream));
+        const Work work = fft_c2c_work(n, batch);
 
-        // cuFFT's signature takes a non-const input even out of place, but a C2C transform out
-        // of place leaves its input untouched.
-        auto* in = const_cast<cufftComplex*>(reinterpret_cast<const cufftComplex*>(x));
-        auto* out = reinterpret_cast<cufftComplex*>(y);
-        const Timing t = time_kernel(
-            [&](cudaStream_t) { CUFFT_CHECK(cufftExecC2C(plan.get(), in, out, CUFFT_FORWARD)); },
-            stream, options.timing);
-        write_row(os, {"fft_c2c", "cufft", n, batch, t, fft_c2c_work(n, batch)}, progress);
+        if (options.wants("cufft")) {
+            FftPlan plan(static_cast<int>(n), static_cast<int>(batch));
+            CUFFT_CHECK(cufftSetStream(plan.get(), stream));
+            // cuFFT's signature takes a non-const input even out of place, but a C2C transform
+            // out of place leaves its input untouched.
+            auto* in = const_cast<cufftComplex*>(reinterpret_cast<const cufftComplex*>(x));
+            auto* out = reinterpret_cast<cufftComplex*>(y);
+            const Timing t = time_kernel(
+                [&](cudaStream_t) {
+                    CUFFT_CHECK(cufftExecC2C(plan.get(), in, out, CUFFT_FORWARD));
+                },
+                stream, options.timing);
+            write_row(os, {"fft_c2c", "cufft", n, batch, t, work}, progress);
+        }
+
+        if (options.wants("naive")) {
+            const Timing t = time_kernel(
+                [&](cudaStream_t s) {
+                    spectral::fft::c2c_naive(x, y, static_cast<int>(n), static_cast<int>(batch),
+                                             spectral::fft::Direction::Forward, s);
+                },
+                stream, options.timing);
+            write_row(os, {"fft_c2c", "naive", n, batch, t, work}, progress);
+        }
     }
 }
 
@@ -246,7 +272,7 @@ int main(int argc, char** argv)
         if (options.op == "all" || options.op == "fft_c2c") {
             bench_fft_c2c(options, x.get(), y.get(), stream, os, progress);
         }
-        if (options.op == "all" || options.op == "scale") {
+        if ((options.op == "all" || options.op == "scale") && options.wants("ours")) {
             bench_scale(options, x.get(), y.get(), stream, os, progress);
         }
 

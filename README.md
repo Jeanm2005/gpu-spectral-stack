@@ -12,13 +12,22 @@ files by `python tools/make_figures.py`.
 ## Machine and conditions
 
 NVIDIA GeForce RTX 5080 Laptop GPU (compute capability 12.0, 60 SMs, 16 GB GDDR7), CUDA 13.4,
-WSL2 on Windows. Laptop plugged in, Windows power mode "Best performance", vendor profile set
-to Performance. Conditions for comparable runs are in docs/DEVELOPMENT.md.
+WSL2 on Windows, plugged in. **Every number here was measured with the GPU core clock locked at
+1200 MHz** (`nvidia-smi -lgc 1200,1200`, see docs/DEVELOPMENT.md); under the lock the clock
+holds steady near 1130 MHz at about 92 W. The peaks were measured under the same lock, so every
+percentage of peak compares like with like.
 
-## Measured bandwidth versus the datasheet
+## Why the clock is locked
 
-The measured copy bandwidth is about 520 GB/s, against 896 GB/s on the datasheet (256-bit bus
-at 28 Gbps). PyTorch's own device-to-device copy reaches the same 520 GB/s on this machine, and
-the number does not change with power settings, so it is what this laptop sustains under WSL2,
-not a limit of the measurement kernel. All percentages of peak in this repository are relative
-to the measured value, which is the honest ceiling for kernels running on this machine.
+Unlocked, this laptop's GPU reaches its roughly 100 W power limit under any sustained
+memory-bound load. The power controller then swings the core clock between about 630 and
+1660 MHz once a second (`nvidia-smi` reports reason 0x4, software power cap, throughout; the
+memory clock and the temperature stay steady). A lower core clock keeps fewer memory requests
+in flight, so achieved bandwidth follows the swing: two identical benchmark runs differed by up
+to 40 % per row, and neither the median nor the minimum of a row was stable, because a row
+fits inside a single phase of the swing. With the clock locked, two consecutive runs agree to
+within 0.5 % on nearly every row.
+
+The cost is absolute speed: these numbers are below what the GPU reaches in short bursts at
+boost clocks (a copy kernel briefly reached 757 GB/s unlocked, against the datasheet's 896).
+Comparisons between implementations, which are the point of this repository, are unaffected.

@@ -26,7 +26,7 @@ Conventions
 
 ## Phase 1: FFT kernels (Nov 16 – early Jan)
 
-- [ ] 1.1 Naive batched radix-2 Cooley–Tukey, complex-to-complex (C2C), forward and inverse
+- [X] 1.1 Naive batched radix-2 Cooley–Tukey, complex-to-complex (C2C), forward and inverse
 - [ ] 1.2 Stockham radix-2 in shared memory, one block per transform (N ≤ 4096)
 - [ ] 1.3 Radix-4 and mixed radix 2/4/8; twiddle factors from a table vs computed on the fly
 - [ ] 1.4 (optional) Multi-block FFT for N beyond shared memory (four-step algorithm)

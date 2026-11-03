@@ -9,6 +9,8 @@ README's light and dark themes:
                     measured ceilings, memory bandwidth and FP32 throughput
     fft_bandwidth   effective bandwidth of each FFT implementation by transform size, against
                     the measured copy bandwidth
+
+bench_torch.csv is not plotted: torch.fft runs cuFFT, and its curve would sit on cuFFT's.
 """
 
 from __future__ import annotations
@@ -24,28 +26,33 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Colors follow the implementation, never its position in a list, so each implementation keeps
-# its color in every figure and when others are added. These are categorical slots 1-3 of the
-# reference palette, which stay distinguishable in scatter plots for every pair, including under
-# color-vision deficiency. Beyond three implementations in one scatter, facet instead.
+# Colors follow the implementation, never its position in a list, so each keeps its color in
+# every figure. These are categorical slots 1-3 of the reference palette, the only three that
+# stay distinguishable in every pair, including under color-vision deficiency (checked with the
+# palette validator in both modes). Distinct marker shapes are the second cue. When more
+# implementations arrive, superseded ones become gray rather than taking a fourth hue.
 THEMES = {
     "light": {
         "surface": "#fcfcfb",
         "text": "#0b0b0b",
         "muted": "#52514e",
         "grid": "#e6e5e1",
-        "series": {"cufft": "#2a78d6", "torch": "#eb6834", "ours": "#1baf7a"},
+        "series": {"cufft": "#2a78d6", "naive": "#eb6834", "ours": "#1baf7a"},
     },
     "dark": {
         "surface": "#1a1a19",
         "text": "#f0efec",
         "muted": "#c3c2b7",
         "grid": "#34332f",
-        "series": {"cufft": "#3987e5", "torch": "#d95926", "ours": "#199e70"},
+        "series": {"cufft": "#3987e5", "naive": "#d95926", "ours": "#199e70"},
     },
 }
-MARKERS = {"cufft": "o", "torch": "s", "ours": "D"}  # shape as a second cue besides color
-LABELS = {"cufft": "cuFFT", "torch": "torch.fft (cuFFT via PyTorch)", "ours": "our kernels"}
+MARKERS = {"cufft": "o", "naive": "^", "ours": "D"}
+LABELS = {
+    "cufft": "cuFFT",
+    "naive": "naive radix-2 (ours)",
+    "ours": "scale kernel (bandwidth reference)",
+}
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -89,9 +96,9 @@ def styled_axes(theme: dict):
     return fig, ax
 
 
-def finish(fig, ax, theme: dict, title: str, path: Path) -> None:
+def finish(fig, ax, theme: dict, title: str, path: Path, legend_loc: str) -> None:
     ax.set_title(title, color=theme["text"], loc="left", fontsize=11)
-    ax.legend(frameon=False, labelcolor=theme["text"], loc="lower right")
+    ax.legend(frameon=False, labelcolor=theme["text"], loc=legend_loc)
     fig.savefig(path, facecolor=theme["surface"], bbox_inches="tight")
     plt.close(fig)
 
@@ -104,7 +111,7 @@ def roofline(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
     lo = min(min(intensity) / 2, 0.05)
     hi = max(max(intensity) * 2, ridge * 4)
     xs = np.geomspace(lo, hi, 256)
-    bottom = lo * bw / 2
+    bottom = min(min(r["gflops"] for r in rows) / 2, lo * bw / 2)
 
     fig, ax = styled_axes(theme)
     ax.plot(xs, np.minimum(fp32, xs * bw), color=theme["muted"], linewidth=2, zorder=2)
@@ -166,7 +173,7 @@ def roofline(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
     ax.set_ylim(bottom, fp32 * 3)
     ax.set_xlabel("arithmetic intensity (flop/byte)")
     ax.set_ylabel("GFLOP/s")
-    finish(fig, ax, theme, f"Roofline, {peaks['device']}", path)
+    finish(fig, ax, theme, f"Roofline, {peaks['device']}", path, "lower right")
 
 
 def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
@@ -205,7 +212,14 @@ def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> Non
     ax.set_ylim(0, bw * 1.15)
     ax.set_xlabel("transform size N (points)")
     ax.set_ylabel("effective bandwidth (GB/s)")
-    finish(fig, ax, theme, "Complex FFT effective bandwidth, 2^24 points per launch", path)
+    finish(
+        fig,
+        ax,
+        theme,
+        "Complex FFT effective bandwidth, 2^24 points per launch",
+        path,
+        "upper right",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -217,9 +231,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     rows = load_rows(args.results / "bench.csv")
-    torch_csv = args.results / "bench_torch.csv"
-    if torch_csv.exists():
-        rows += load_rows(torch_csv)
     peaks = json.loads((args.results / "peaks.json").read_text())
 
     args.figures.mkdir(parents=True, exist_ok=True)

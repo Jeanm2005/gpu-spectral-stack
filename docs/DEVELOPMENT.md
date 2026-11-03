@@ -52,17 +52,37 @@ Edits to `.py` files take effect immediately.
 
 ## Benchmarks
 
+**Lock the GPU core clock first.** Under sustained load this laptop's GPU hits its power limit,
+and the power controller swings the core clock between about 630 and 1660 MHz once a second;
+unlocked, identical runs differ by up to 40 % (docs/results/README.md has the measurements). In
+PowerShell, as Administrator (clock locking is not available from inside WSL):
+
+```powershell
+nvidia-smi -lgc 1200,1200     # lock; undo with:  nvidia-smi -rgc   (a reboot also resets it)
+```
+
+Check the lock holds under load: the core clock should stay flat (about 1130 MHz here) while a
+benchmark runs.
+
+```bash
+./build/spectral_bench --op fft_c2c --impl cufft --sizes 512 --warmup 0 --rounds 1000 > /dev/null &
+timeout 8 nvidia-smi --query-gpu=clocks.sm,power.draw,clocks_event_reasons.active --format=csv -lms 200
+wait
+```
+
+If it drifts, lock lower (`-lgc 1100,1100`) and re-measure the peaks too. Then:
+
 ```bash
 ./build/spectral_bench --out out/bench.csv
 python tools/bench_compare.py docs/results/bench.csv out/bench.csv
 ```
 
-Conditions for numbers that will be compared or committed: laptop plugged in, the same Windows
-power mode, no other GPU work (games, video), a few minutes after start-up. WSL cannot lock GPU
-clocks, which is why the regression threshold is 10 %.
+Also: laptop plugged in, no other GPU work (games, video). Under the lock, consecutive runs
+agree to within 0.5 %, so a 10 % regression threshold flags only real changes.
 
 `docs/results/` holds the committed baseline. Update it only in a commit whose purpose includes
-the performance change, and paste the `bench_compare` output into that commit message.
+the performance change, and paste the `bench_compare` output into that commit message. Every
+committed number, the peaks included, must come from the same clock lock.
 
 ## Profiling with Nsight Compute
 
@@ -72,8 +92,8 @@ Desktop menu → Enable Developer Settings, then Developer → Manage GPU Perfor
 `ERR_NVGPUCTRPERM`.
 
 ```bash
-tools/profile_kernels.sh                  # default cases
-tools/profile_kernels.sh fft_c2c 1024     # one case
+tools/profile_kernels.sh                        # default cases
+tools/profile_kernels.sh fft_c2c naive 1024     # one case
 ```
 
 Reports go to `docs/profiles/`. `--set full` replays each kernel dozens of times to collect
@@ -83,7 +103,7 @@ of a report maps stalls to lines of our kernels.
 ## Roofline and figures
 
 ```bash
-./build/spectral_peaks --out docs/results/peaks.json   # measured ceilings of this GPU
+./build/spectral_peaks --out docs/results/peaks.json   # measured ceilings, under the clock lock
 python tools/make_figures.py                           # docs/figures/*.png, light and dark
 ```
 
