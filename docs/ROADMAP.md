@@ -34,7 +34,7 @@ Conventions
 - [X] 1.6 2D FFT: row transforms then column transforms (transpose vs strided), rfft2/irfft2
 - [X] 1.7 Pruned transforms: forward that outputs only the first k modes, inverse that
       reads only k non-zero modes
-- [ ] 1.8 Results: table against cuFFT by size and batch, roofline, profiling log, README
+- [X] 1.8 Results: table against cuFFT by size and batch, roofline, profiling log, README
 - [ ] 1.9 In gpu-rf-pipeline: `--fft-impl custom`, window functions, overlap-save FIR,
       chirp and BPSK/QPSK fixtures
 

@@ -4,7 +4,9 @@
 // Inputs are random complex64 values generated once on the host and uploaded once. Each size
 // runs batch = total / n transforms, so every row processes the same number of points (2^24, or
 // 128 MiB of complex64, by default): enough to fill the GPU at every size, and the rows are
-// comparable with each other. Lines starting with '#' record the device and the settings.
+// comparable with each other. --batches runs fixed batch counts instead, to see how each
+// implementation does when there is too little work to fill the GPU. Lines starting with '#'
+// record the device and the settings.
 //
 // 2D rows (fft2_*) transform square n x n arrays, batch = total / n^2 of them (sizes whose array
 // exceeds `total` are skipped). Our implementations appear once per column method, as
@@ -50,6 +52,8 @@ const char* const kUsage =
     "  --impl NAME     all (default), cufft, ours (the scale kernel), or one of our FFTs\n"
     "  --sizes LIST    comma-separated transform sizes (default: 2,4,...,4096)\n"
     "  --total N       points per row; batch = total / n (default: 16777216)\n"
+    "  --batches LIST  comma-separated batch counts to run at every size instead of\n"
+    "                  total / n (rows whose points exceed --total are skipped)\n"
     "  --warmup N      untimed launches (default: 3)\n"
     "  --rounds N      timed measurements; the median is reported (default: 5)\n"
     "  --iters N       launches per measurement (default: 20)\n"
@@ -59,6 +63,7 @@ struct Options {
     std::string op = "all";
     std::string impl = "all";
     std::vector<long long> sizes;
+    std::vector<long long> batches;  // empty: batch = total / n
     long long total = 1LL << 24;
     TimingConfig timing;
     std::string out;
@@ -87,18 +92,18 @@ long long parse_int(const std::string& text, const std::string& flag, long long 
     return value;
 }
 
-std::vector<long long> parse_sizes(const std::string& text)
+std::vector<long long> parse_list(const std::string& text, const std::string& flag)
 {
-    std::vector<long long> sizes;
+    std::vector<long long> values;
     std::stringstream stream(text);
     std::string item;
     while (std::getline(stream, item, ',')) {
-        sizes.push_back(parse_int(item, "--sizes", 1));
+        values.push_back(parse_int(item, flag, 1));
     }
-    if (sizes.empty()) {
-        usage_error("--sizes needs at least one size");
+    if (values.empty()) {
+        usage_error(flag + " needs at least one value");
     }
-    return sizes;
+    return values;
 }
 
 Options parse_options(int argc, char** argv)
@@ -120,7 +125,9 @@ Options parse_options(int argc, char** argv)
         } else if (flag == "--impl") {
             options.impl = value;
         } else if (flag == "--sizes") {
-            options.sizes = parse_sizes(value);
+            options.sizes = parse_list(value, flag);
+        } else if (flag == "--batches") {
+            options.batches = parse_list(value, flag);
         } else if (flag == "--total") {
             options.total = parse_int(value, flag, 1);
         } else if (flag == "--warmup") {
@@ -221,11 +228,39 @@ std::vector<cf32> random_input(std::size_t count)
     return values;
 }
 
+struct Case {
+    long long n;
+    long long batch;
+};
+
+// The (size, batch) pairs to run, for transforms of n^dims points: each size with batch =
+// total / n^dims, or, with --batches, each size with each listed batch whose points fit in total.
+std::vector<Case> cases(const Options& options, int dims)
+{
+    std::vector<Case> out;
+    for (const long long n : options.sizes) {
+        const long long points = dims == 1 ? n : n * n;
+        if (options.batches.empty()) {
+            if (points <= options.total) {
+                out.push_back({n, options.total / points});
+            }
+            continue;
+        }
+        for (const long long batch : options.batches) {
+            if (points * batch <= options.total) {
+                out.push_back({n, batch});
+            }
+        }
+    }
+    return out;
+}
+
 void bench_fft_c2c(const Options& options, const cf32* x, cf32* y, cudaStream_t stream,
                    std::ostream& os, bool progress)
 {
-    for (const long long n : options.sizes) {
-        const long long batch = std::max(1LL, options.total / n);
+    for (const Case& c : cases(options, 1)) {
+        const long long n = c.n;
+        const long long batch = c.batch;
         const Work work = fft_c2c_work(n, batch);
 
         if (options.wants("cufft")) {
@@ -266,11 +301,12 @@ void bench_fft_real(const Options& options, const char* op, const cf32* x, cf32*
                     cudaStream_t stream, std::ostream& os, bool progress)
 {
     const bool forward = std::string(op) == "fft_r2c";
-    for (const long long n : options.sizes) {
+    for (const Case& c : cases(options, 1)) {
+        const long long n = c.n;
+        const long long batch = c.batch;
         if (n < 2) {
             continue;
         }
-        const long long batch = std::max(1LL, options.total / n);
         const Work w = fft_real_work(n, batch);
         const auto* x_real = reinterpret_cast<const float*>(x);
         auto* y_real = reinterpret_cast<float*>(y);
@@ -313,19 +349,20 @@ void bench_fft_real(const Options& options, const char* op, const cf32* x, cf32*
     }
 }
 
-// 2D transforms of square n x n arrays (see the top of this file). `work` must hold the largest
-// workspace any implementation asks for; main() allocates 3 * total complex values.
+// 2D transforms of square n x n arrays (see the top of this file). Each row gets the workspace
+// its implementation and method ask for (fft/fft2d.hpp), allocated before the timing.
 void bench_fft2(const Options& options, const std::string& op, const cf32* x, cf32* y,
-                cf32* work, cudaStream_t stream, std::ostream& os, bool progress)
+                cudaStream_t stream, std::ostream& os, bool progress)
 {
     using spectral::fft::Columns;
     const bool c2c = op == "fft2_c2c";
     const bool r2c = op == "fft2_r2c";
-    for (const long long n : options.sizes) {
-        if (n * n > options.total || (!c2c && n < 2)) {
+    for (const Case& c : cases(options, 2)) {
+        const long long n = c.n;
+        const long long batch = c.batch;
+        if (!c2c && n < 2) {
             continue;
         }
-        const long long batch = options.total / (n * n);
         const int ni = static_cast<int>(n);
         const int bi = static_cast<int>(batch);
         const Work w = c2c ? fft2_c2c_work(n, n, batch) : fft2_real_work(n, n, batch);
@@ -362,6 +399,12 @@ void bench_fft2(const Options& options, const std::string& op, const cf32* x, cf
                 if (method == Columns::Strided && impl.columns == nullptr) {
                     continue;
                 }
+                const std::size_t need =
+                    c2c   ? spectral::fft::fft2_c2c_workspace(impl, method, ni, ni, bi)
+                    : r2c ? spectral::fft::fft2_r2c_workspace(impl, method, ni, ni, bi)
+                          : spectral::fft::fft2_c2r_workspace(impl, method, ni, ni, bi);
+                DeviceBuffer<cf32> scratch(need);  // allocated outside the timing
+                cf32* work = scratch.get();
                 const Timing t = time_kernel(
                     [&](cudaStream_t s) {
                         if (c2c) {
@@ -383,16 +426,18 @@ void bench_fft2(const Options& options, const std::string& op, const cf32* x, cf
     }
 }
 
-// Pruned 2D real transforms of square n x n arrays (see the top of this file).
+// Pruned 2D real transforms of square n x n arrays (see the top of this file). Workspaces are
+// allocated per row, before the timing.
 void bench_modes(const Options& options, const std::string& op, const cf32* x, cf32* y,
-                 cf32* work, cudaStream_t stream, std::ostream& os, bool progress)
+                 cudaStream_t stream, std::ostream& os, bool progress)
 {
     const bool forward = op == "rfft2_modes";
-    for (const long long n : options.sizes) {
-        if (n < 2 || n * n > options.total) {
+    for (const Case& c : cases(options, 2)) {
+        const long long n = c.n;
+        const long long batch = c.batch;
+        if (n < 2) {
             continue;
         }
-        const long long batch = options.total / (n * n);
         const long long m = std::max(1LL, n / 8);
         const int ni = static_cast<int>(n);
         const int mi = static_cast<int>(m);
@@ -404,14 +449,17 @@ void bench_modes(const Options& options, const std::string& op, const cf32* x, c
         if (options.wants("cufft")) {
             FftPlan plan(ni, ni, bi, forward ? CUFFT_R2C : CUFFT_C2R);
             CUFFT_CHECK(cufftSetStream(plan.get(), stream));
-            auto* full = reinterpret_cast<cufftComplex*>(work);
+            // The full half spectrum, n x (n/2 + 1) per array.
+            DeviceBuffer<cf32> spectrum(static_cast<std::size_t>(batch) * ni * (ni / 2 + 1));
+            cf32* half = spectrum.get();
+            auto* full = reinterpret_cast<cufftComplex*>(half);
             const Timing t = time_kernel(
                 [&](cudaStream_t s) {
                     if (forward) {
                         CUFFT_CHECK(cufftExecR2C(plan.get(), const_cast<float*>(x_real), full));
-                        spectral::fft::gather_modes(work, y, ni, ni / 2 + 1, mi, mi, bi, s);
+                        spectral::fft::gather_modes(half, y, ni, ni / 2 + 1, mi, mi, bi, s);
                     } else {
-                        spectral::fft::scatter_modes(x, work, ni, ni / 2 + 1, mi, mi, bi, s);
+                        spectral::fft::scatter_modes(x, half, ni, ni / 2 + 1, mi, mi, bi, s);
                         CUFFT_CHECK(cufftExecC2R(plan.get(), full, y_real));
                     }
                 },
@@ -424,6 +472,11 @@ void bench_modes(const Options& options, const std::string& op, const cf32* x, c
             if (!options.wants(impl.name) || n > impl.max_n) {
                 continue;
             }
+            const std::size_t need =
+                forward ? spectral::fft::rfft2_modes_workspace(impl, ni, ni, mi, mi, bi)
+                        : spectral::fft::irfft2_modes_workspace(impl, ni, ni, mi, mi, bi);
+            DeviceBuffer<cf32> scratch(need);  // allocated outside the timing
+            cf32* work = scratch.get();
             const Timing t = time_kernel(
                 [&](cudaStream_t s) {
                     if (forward) {
@@ -465,7 +518,7 @@ int main(int argc, char** argv)
         const auto count = static_cast<std::size_t>(capacity);
         DeviceBuffer<cf32> x(count);
         DeviceBuffer<cf32> y(count);
-        DeviceBuffer<cf32> work(3 * count);  // the largest workspace: 2D, transposed, naive
+        DeviceBuffer<cf32> work(count / 2 + 1);  // 1D real transforms without a fused kernel
         {
             const std::vector<cf32> host = random_input(count);
             x.upload(host.data(), count);
@@ -495,12 +548,12 @@ int main(int argc, char** argv)
         }
         for (const char* op : {"fft2_c2c", "fft2_r2c", "fft2_c2r"}) {
             if (options.op == "all" || options.op == op) {
-                bench_fft2(options, op, x.get(), y.get(), work.get(), stream, os, progress);
+                bench_fft2(options, op, x.get(), y.get(), stream, os, progress);
             }
         }
         for (const char* op : {"rfft2_modes", "irfft2_modes"}) {
             if (options.op == "all" || options.op == op) {
-                bench_modes(options, op, x.get(), y.get(), work.get(), stream, os, progress);
+                bench_modes(options, op, x.get(), y.get(), stream, os, progress);
             }
         }
         if ((options.op == "all" || options.op == "scale") && options.wants("ours")) {

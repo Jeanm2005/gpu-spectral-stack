@@ -5,10 +5,15 @@
 Each figure is written in a light and a dark version (name.png and name-dark.png), for the
 README's light and dark themes:
 
-    roofline        every benchmark row as a point (arithmetic intensity, GFLOP/s) under the two
-                    measured ceilings, memory bandwidth and FP32 throughput
-    fft_bandwidth   effective bandwidth of each FFT implementation by transform size, against
-                    the measured copy bandwidth
+    roofline        every 1D complex FFT row (and the scale kernel) as a point (arithmetic
+                    intensity, GFLOP/s) under the two measured ceilings, memory bandwidth and
+                    FP32 throughput
+    fft_bandwidth   effective bandwidth of each 1D complex FFT implementation by transform size,
+                    against the measured copy bandwidth
+    fft2_columns    2D real-to-complex bandwidth: strided column transforms against transposing,
+                    and cuFFT (drawn when bench.csv has fft2_r2c rows)
+    pruned          time of the pruned 2D forward transform against the full one and cuFFT plus
+                    a gather (drawn when bench.csv has rfft2_modes rows)
 
 bench_torch.csv is not plotted: torch.fft runs cuFFT, and its curve would sit on cuFFT's.
 """
@@ -105,6 +110,7 @@ def load_rows(path: Path) -> list[dict]:
             "impl": row["impl"],
             "n": int(row["n"]),
             "batch": int(row["batch"]),
+            "time_ms": float(row["time_ms"]),
             "gflops": float(row["gflops"]),
             "gbps": float(row["gbps"]),
         }
@@ -218,21 +224,34 @@ def roofline(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
     finish(fig, ax, theme, f"Roofline, {peaks['device']}", path, loc="lower right")
 
 
+def spread(labels: list[tuple[float, str]], gap: float) -> list[tuple[float, str]]:
+    """Labels sorted by height, highest first, moved down where needed so that neighbours are at
+    least `gap` apart."""
+    out: list[tuple[float, str]] = []
+    for y, text in labels:
+        if out and out[-1][0] - y < gap:
+            y = out[-1][0] - gap
+        out.append((y, text))
+    return out
+
+
 def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
     ffts = [r for r in rows if r["op"] == "fft_c2c"]
     bw = peaks["peak_bandwidth_gbps"]
     sizes = sorted({r["n"] for r in ffts})
 
+    top = max(bw, max(r["gbps"] for r in ffts)) * 1.15
     fig, ax = styled_axes(theme)
     ax.axhline(bw, color=theme["muted"], linewidth=1, linestyle="--", zorder=1)
-    ax.text(
+    ax.text(  # below the line: the fast implementations run just above it
         sizes[0],
-        bw * 1.02,
+        bw * 0.98,
         "measured copy bandwidth",
         color=theme["muted"],
         fontsize=9,
-        va="bottom",
+        va="top",
     )
+    direct_labels = []
     for impl in present_impls(ffts):
         pts = sorted((r for r in ffts if r["impl"] == impl), key=lambda r: r["n"])
         highlighted = is_highlighted(impl)
@@ -249,22 +268,20 @@ def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> Non
             zorder=4 if highlighted else 3,
         )
         if not highlighted:  # gray lines carry a direct label, so identity is never color alone
-            last = pts[-1]
-            ax.annotate(
-                LABELS[impl],
-                (last["n"], last["gbps"]),
-                xytext=(8, 0),
-                textcoords="offset points",
-                color=theme["muted"],
-                fontsize=8,
-                va="center",
-            )
+            # Short form: the legend beside the plot has the full names.
+            direct_labels.append((pts[-1]["gbps"], LABELS[impl].removeprefix("Stockham ")))
+
+    # Ends of lines can sit within a few GB/s of each other: spread their labels apart.
+    gap = 0.045 * top
+    placed = spread(sorted(direct_labels, reverse=True), gap)
+    for y, text in placed:
+        ax.text(sizes[-1] * 1.18, y, text, color=theme["muted"], fontsize=8, va="center")
 
     ax.set_xscale("log", base=2)
     ax.set_xticks(sizes, [str(n) for n in sizes])
     ax.minorticks_off()
-    ax.set_xlim(sizes[0] / 1.3, sizes[-1] * 4)  # room for the direct labels on the right
-    ax.set_ylim(0, bw * 1.15)
+    ax.set_xlim(sizes[0] / 1.3, sizes[-1] * 8)  # room for the direct labels on the right
+    ax.set_ylim(0, top)
     ax.set_xlabel("transform size N (points)")
     ax.set_ylabel("effective bandwidth (GB/s)")
     finish(
@@ -275,6 +292,121 @@ def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> Non
         path,
         loc="upper left",
         bbox_to_anchor=(1.01, 1.0),  # outside the axes: the lines fill the whole plot
+    )
+
+
+def comparison(
+    rows: list[dict],
+    series: list[tuple[str, str, str, str, str]],
+    ylabel: str,
+    value,
+    theme: dict,
+    title: str,
+    path: Path,
+    ylog: bool = False,
+) -> bool:
+    """One line per (op, impl, label, role, marker) in `series`, by size n. The role picks the
+    color from the same three slots as the other figures: "cufft", "newest", or "gray" (gray lines
+    carry a direct label). Returns False, drawing nothing, when no series has data."""
+    found = [
+        (s, sorted((r for r in rows if (r["op"], r["impl"]) == s[:2]), key=lambda r: r["n"]))
+        for s in series
+    ]
+    found = [(s, pts) for s, pts in found if pts]
+    if not found:
+        return False
+
+    fig, ax = styled_axes(theme)
+    sizes = sorted({r["n"] for _, pts in found for r in pts})
+    for (_, _, label, role, marker), pts in found:
+        color = theme["superseded"] if role == "gray" else theme["hues"][role]
+        highlighted = role != "gray"
+        ax.plot(
+            [r["n"] for r in pts],
+            [value(r) for r in pts],
+            color=color,
+            linewidth=2 if highlighted else 1.5,
+            marker=marker,
+            markersize=7 if highlighted else 6,
+            markeredgecolor=theme["surface"],
+            markeredgewidth=1.5,
+            label=label,
+            zorder=4 if highlighted else 3,
+        )
+        if not highlighted:
+            last = pts[-1]
+            ax.annotate(
+                label,
+                (last["n"], value(last)),
+                xytext=(8, 0),
+                textcoords="offset points",
+                color=theme["muted"],
+                fontsize=8,
+                va="center",
+            )
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(sizes, [str(n) for n in sizes])
+    ax.minorticks_off()
+    ax.set_xlim(sizes[0] / 1.3, sizes[-1] * 4)
+    if ylog:
+        ax.set_yscale("log")
+    else:
+        ax.set_ylim(bottom=0)
+    ax.set_xlabel("n (points per side)")
+    ax.set_ylabel(ylabel)
+    finish(fig, ax, theme, title, path, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    return True
+
+
+def fft2_columns(rows: list[dict], theme: dict, path: Path) -> bool:
+    """2D real-to-complex bandwidth: strided columns against transposing, and cuFFT."""
+    return comparison(
+        rows,
+        [
+            (
+                "fft2_r2c",
+                f"{NEWEST}/transpose",
+                "Stockham radix-8, transposed columns",
+                "gray",
+                "s",
+            ),
+            (
+                "fft2_r2c",
+                f"{NEWEST}/strided",
+                "Stockham radix-8, strided columns (ours)",
+                "newest",
+                "P",
+            ),
+            ("fft2_r2c", "cufft", "cuFFT", "cufft", "o"),
+        ],
+        "effective bandwidth (GB/s)",
+        lambda r: r["gbps"],
+        theme,
+        "2D real-to-complex FFT, n x n arrays, 2^24 points per launch",
+        path,
+    )
+
+
+def pruned(rows: list[dict], theme: dict, path: Path) -> bool:
+    """Time per launch of the pruned 2D forward transform against the full one."""
+    return comparison(
+        rows,
+        [
+            ("fft2_r2c", "cufft", "cuFFT, full rfft2 (all modes)", "gray", "o"),
+            ("rfft2_modes", "cufft+gather", "cuFFT rfft2 + gather of the modes", "cufft", "o"),
+            (
+                "rfft2_modes",
+                NEWEST,
+                "Stockham radix-8, pruned in the kernels (ours)",
+                "newest",
+                "P",
+            ),
+        ],
+        "time per launch (ms)",
+        lambda r: r["time_ms"],
+        theme,
+        "2D real-to-complex keeping n/8 x n/8 modes, 2^24 points per launch",
+        path,
     )
 
 
@@ -289,12 +421,20 @@ def main(argv: list[str] | None = None) -> int:
     rows = load_rows(args.results / "bench.csv")
     peaks = json.loads((args.results / "peaks.json").read_text())
 
+    # The roofline and the bandwidth chart are about the 1D complex kernels (and the scale kernel
+    # as a bandwidth reference); the other operations have their own figures.
+    c2c = [r for r in rows if r["op"] in ("fft_c2c", "scale")]
+
     args.figures.mkdir(parents=True, exist_ok=True)
+    written = 0
     for name, theme in THEMES.items():
         suffix = "" if name == "light" else f"-{name}"
-        roofline(rows, peaks, theme, args.figures / f"roofline{suffix}.png")
-        fft_bandwidth(rows, peaks, theme, args.figures / f"fft_bandwidth{suffix}.png")
-    print(f"wrote {2 * len(THEMES)} figures to {args.figures}")
+        roofline(c2c, peaks, theme, args.figures / f"roofline{suffix}.png")
+        fft_bandwidth(c2c, peaks, theme, args.figures / f"fft_bandwidth{suffix}.png")
+        written += 2
+        written += fft2_columns(rows, theme, args.figures / f"fft2_columns{suffix}.png")
+        written += pruned(rows, theme, args.figures / f"pruned{suffix}.png")
+    print(f"wrote {written} figures to {args.figures}")
     return 0
 
 
