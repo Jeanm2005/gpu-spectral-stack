@@ -9,6 +9,7 @@ files by `python tools/make_figures.py`, and the tables in the top-level README 
 | `bench.csv` | median time, GFLOP/s, and effective GB/s of every C++ implementation of every operation, 2^24 points per launch | `./build/spectral_bench --out docs/results/bench.csv` |
 | `bench_batch.csv` | 1D complex FFTs at fixed sizes over a range of batch counts | `./build/spectral_bench --op fft_c2c --sizes 64,1024,4096 --batches 1,8,64,512,4096 --out docs/results/bench_batch.csv` |
 | `bench_torch.csv` | the same for torch.fft, to show PyTorch's overhead over raw cuFFT | `python bench/bench_torch.py --out docs/results/bench_torch.csv` |
+| `bench_rf.csv` | `spectral.rf` overlap-save FIR (63 and 1025 taps) and windowed spectrum on 2^22 samples, with cuFFT and with each of our FFTs | `python bench/bench_rf.py --out docs/results/bench_rf.csv` |
 | `peaks.json` | achievable DRAM bandwidth and FP32 throughput: the roofline's ceilings | `./build/spectral_peaks --out docs/results/peaks.json` |
 
 ## Machine and conditions

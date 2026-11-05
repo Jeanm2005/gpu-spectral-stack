@@ -27,6 +27,10 @@ On top of them (`python/spectral/ops.py`):
   transposed (`columns="strided" | "transpose"`)
 - pruned transforms for the FNO mode layout (`fft_truncated`, `ifft_from_modes`,
   `rfft2_truncated`, `irfft2_from_modes`): only the kept modes cross global memory
+- radio processing (`spectral.rf`): periodic windows, a framed spectrum, and overlap-save FIR
+  filtering, each with `fft_impl="cufft"` or any of our kernels, also from the command line
+  (`python -m spectral.rf fir --in x.cf32 --taps h.f32 --out y.cf32 --fft-impl stockham_r8`);
+  chirp, BPSK, and QPSK test signals in `tests/fixtures/rf/` (`tools/gen_rf_fixtures.py`)
 
 All of them are checked against float64 NumPy references with a tolerance that grows with
 log2 N (`python/spectral/testing.py`).

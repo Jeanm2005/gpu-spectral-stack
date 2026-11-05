@@ -1,0 +1,8 @@
+{
+  "sample_rate": 1000000.0,
+  "num_samples": 16384,
+  "generator": "gen_rf_fixtures.chirp",
+  "seed": null,
+  "f0_hz": -250000.0,
+  "f1_hz": 250000.0
+}

@@ -35,8 +35,9 @@ Conventions
 - [X] 1.7 Pruned transforms: forward that outputs only the first k modes, inverse that
       reads only k non-zero modes
 - [X] 1.8 Results: table against cuFFT by size and batch, roofline, profiling log, README
-- [ ] 1.9 In gpu-rf-pipeline: `--fft-impl custom`, window functions, overlap-save FIR,
-      chirp and BPSK/QPSK fixtures
+- [X] 1.9 Radio processing on our FFTs, in this repository (`spectral.rf`; gpu-rf-pipeline is
+      left as it is): `--fft-impl` choosing cuFFT or any of our kernels, window functions,
+      overlap-save FIR, chirp and BPSK/QPSK fixtures
 
 CI added in this phase: build for every target architecture, CPU tests of the reference and
 of the tolerance policy, Nsight reports and figures regenerated from committed data.
