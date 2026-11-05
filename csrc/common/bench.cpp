@@ -124,3 +124,13 @@ Work fft2_real_work(long long n1, long long n2, long long batch)
               * (4.0 * points + 8.0 * static_cast<double>(n1) * (static_cast<double>(n2) / 2 + 1));
     return w;
 }
+
+Work fft2_modes_work(long long n1, long long n2, long long m1, long long m2, long long batch)
+{
+    Work w = fft2_real_work(n1, n2, batch);
+    const double arrays = static_cast<double>(batch);
+    w.bytes = arrays
+              * (4.0 * static_cast<double>(n1) * static_cast<double>(n2)
+                 + 8.0 * 2.0 * static_cast<double>(m1) * static_cast<double>(m2));
+    return w;
+}

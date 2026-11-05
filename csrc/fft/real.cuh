@@ -62,11 +62,13 @@ __device__ __forceinline__ cf32 c2r_prepare(cf32 xk, cf32 xmk, int k, float k_ov
 
 // --- Host side (real.cu) -----------------------------------------------------------------------
 
-// y[t * (m + 1) + k] = X[k] for each of `batch` rows, from z = DFT_m of the row, m per row.
-void r2c_postprocess(const cf32* z, cf32* y, int m, int batch, cudaStream_t stream);
+// y[t * keep + k] = X[k], k < keep <= m + 1, for each of `batch` rows, from z = DFT_m of the
+// row, m per row.
+void r2c_postprocess(const cf32* z, cf32* y, int m, int batch, int keep, cudaStream_t stream);
 
-// z[t * m + k] = Z[k] for each of `batch` rows, from x = the m + 1 complex inputs per row.
-void c2r_preprocess(const cf32* x, cf32* z, int m, int batch, cudaStream_t stream);
+// z[t * m + k] = Z[k] for each of `batch` rows, from the first keep <= m + 1 complex inputs of
+// each row of x (keep per row; the inputs beyond them are zero).
+void c2r_preprocess(const cf32* x, cf32* z, int m, int batch, int keep, cudaStream_t stream);
 
 // Throws std::invalid_argument unless n is a power of two in [2, max_n], batch >= 1, and the
 // real side (n floats per row) and complex side (n/2 + 1 values per row) do not overlap.

@@ -17,6 +17,7 @@
 
 #include "common/types.hpp"
 #include "fft/fft2d.hpp"
+#include "fft/pruned.hpp"
 #include "fft/registry.hpp"
 #include "ops/scale.hpp"
 
@@ -308,6 +309,115 @@ at::Tensor fft2_c2r_cuda(const at::Tensor& x, int64_t n2, c10::string_view impl_
     return y;
 }
 
+// --- Pruned (Task 1.7) -------------------------------------------------------------------------
+
+// Forward: x (..., n) -> the first `keep` outputs (..., keep). Inverse: x (..., keep) holds the
+// first keep modes of n -> (..., n), the other modes taken as zero.
+at::Tensor fft_c2c_pruned_cuda(const at::Tensor& x, int64_t n, int64_t keep, bool inverse,
+                               c10::string_view impl_name)
+{
+    check_complex64_cuda(x, "x");
+    TORCH_CHECK(x.dim() >= 1, "fft_c2c_pruned: x needs at least one dimension");
+    const spectral::fft::FftImpl& impl = find_impl(impl_name);
+    TORCH_CHECK(n >= 1 && n <= INT_MAX && keep >= 1 && keep <= n,
+                "fft_c2c_pruned: need 1 <= keep <= n, got keep = ", keep, ", n = ", n);
+    const int64_t row_in = inverse ? keep : n;
+    TORCH_CHECK(x.size(-1) == row_in, "fft_c2c_pruned: expected ", row_in,
+                " values in the last dimension, got ", x.size(-1));
+
+    std::vector<int64_t> shape = x.sizes().vec();
+    shape.back() = inverse ? n : keep;
+    at::Tensor y = at::empty(shape, x.options());
+    if (x.numel() == 0) {
+        return y;
+    }
+    const int batch = batch_of(x, row_in, "fft_c2c_pruned");
+
+    const c10::cuda::CUDAGuard device_guard(x.device());
+    const at::Tensor xc = x.contiguous();
+    const auto ni = static_cast<int>(n);
+    const auto ki = static_cast<int>(keep);
+    at::Tensor work =
+        workspace(spectral::fft::fft_c2c_pruned_workspace(impl, ni, ki, batch), x);
+    spectral::fft::fft_c2c_pruned(
+        impl, as_cf32(xc), as_cf32_mut(y), ni, ki, batch,
+        inverse ? spectral::fft::Direction::Inverse : spectral::fft::Direction::Forward,
+        workspace_ptr(work), at::cuda::getCurrentCUDAStream());
+    return y;
+}
+
+// x (..., n1, n2) real -> the (..., 2 m1, m2) low-frequency modes of its rfft2.
+at::Tensor rfft2_modes_cuda(const at::Tensor& x, int64_t m1, int64_t m2,
+                            c10::string_view impl_name)
+{
+    TORCH_CHECK(x.is_cuda(), "x must be a CUDA tensor");
+    TORCH_CHECK(x.scalar_type() == at::kFloat, "x must be float32, got ", x.scalar_type());
+    TORCH_CHECK(x.dim() >= 2, "rfft2_modes: x needs at least two dimensions");
+    const spectral::fft::FftImpl& impl = find_impl(impl_name);
+    const int64_t n1 = x.size(-2);
+    const int64_t n2 = x.size(-1);
+    TORCH_CHECK(m1 >= 1 && 2 * m1 <= n1 && m2 >= 1 && m2 <= n2 / 2 + 1,
+                "rfft2_modes: need 1 <= m1 <= n1/2 and 1 <= m2 <= n2/2 + 1, got m1 = ", m1,
+                ", m2 = ", m2, " for ", n1, " x ", n2);
+
+    std::vector<int64_t> shape = x.sizes().vec();
+    shape[shape.size() - 2] = 2 * m1;
+    shape.back() = m2;
+    at::Tensor y = at::empty(shape, x.options().dtype(at::kComplexFloat));
+    if (x.numel() == 0) {
+        return y;
+    }
+    const int batch = batch_of(x, n1 * n2, "rfft2_modes");
+
+    const c10::cuda::CUDAGuard device_guard(x.device());
+    const at::Tensor xc = x.contiguous();
+    const int a = static_cast<int>(n1);
+    const int b = static_cast<int>(n2);
+    const int p = static_cast<int>(m1);
+    const int q = static_cast<int>(m2);
+    at::Tensor work =
+        workspace(spectral::fft::rfft2_modes_workspace(impl, a, b, p, q, batch), x);
+    spectral::fft::rfft2_modes(impl, xc.const_data_ptr<float>(), as_cf32_mut(y), a, b, p, q,
+                               batch, workspace_ptr(work), at::cuda::getCurrentCUDAStream());
+    return y;
+}
+
+// modes (..., 2 m1, m2) -> the real (..., n1, n2) array whose rfft2 has those modes and zeros
+// elsewhere.
+at::Tensor irfft2_modes_cuda(const at::Tensor& modes, int64_t n1, int64_t n2,
+                             c10::string_view impl_name)
+{
+    check_complex64_cuda(modes, "modes");
+    TORCH_CHECK(modes.dim() >= 2, "irfft2_modes: modes needs at least two dimensions");
+    const spectral::fft::FftImpl& impl = find_impl(impl_name);
+    const int64_t two_m1 = modes.size(-2);
+    const int64_t m2 = modes.size(-1);
+    TORCH_CHECK(two_m1 % 2 == 0 && two_m1 >= 2 && two_m1 <= n1 && m2 >= 1 && m2 <= n2 / 2 + 1,
+                "irfft2_modes: modes of shape (", two_m1, ", ", m2, ") do not fit an output of ",
+                n1, " x ", n2);
+
+    std::vector<int64_t> shape = modes.sizes().vec();
+    shape[shape.size() - 2] = n1;
+    shape.back() = n2;
+    at::Tensor y = at::empty(shape, modes.options().dtype(at::kFloat));
+    if (modes.numel() == 0) {
+        return y;
+    }
+    const int batch = batch_of(modes, two_m1 * m2, "irfft2_modes");
+
+    const c10::cuda::CUDAGuard device_guard(modes.device());
+    const at::Tensor mc = modes.contiguous();
+    const int a = static_cast<int>(n1);
+    const int b = static_cast<int>(n2);
+    const int p = static_cast<int>(two_m1 / 2);
+    const int q = static_cast<int>(m2);
+    at::Tensor work =
+        workspace(spectral::fft::irfft2_modes_workspace(impl, a, b, p, q, batch), modes);
+    spectral::fft::irfft2_modes(impl, as_cf32(mc), y.mutable_data_ptr<float>(), a, b, p, q,
+                                batch, workspace_ptr(work), at::cuda::getCurrentCUDAStream());
+    return y;
+}
+
 // spectral._C.fft_impls(): the names in fft/registry.hpp, in order, as a tuple of str.
 PyObject* py_fft_impls(PyObject*, PyObject*)
 {
@@ -344,6 +454,10 @@ TORCH_LIBRARY(spectral, m)
           " -> Tensor");
     m.def("fft2_r2c(Tensor x, str impl=\"naive\", str columns=\"auto\") -> Tensor");
     m.def("fft2_c2r(Tensor x, int n2, str impl=\"naive\", str columns=\"auto\") -> Tensor");
+    m.def("fft_c2c_pruned(Tensor x, int n, int keep, bool inverse=False, str impl=\"naive\")"
+          " -> Tensor");
+    m.def("rfft2_modes(Tensor x, int m1, int m2, str impl=\"naive\") -> Tensor");
+    m.def("irfft2_modes(Tensor modes, int n1, int n2, str impl=\"naive\") -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(spectral, CUDA, m)
@@ -355,6 +469,9 @@ TORCH_LIBRARY_IMPL(spectral, CUDA, m)
     m.impl("fft2_c2c", &fft2_c2c_cuda);
     m.impl("fft2_r2c", &fft2_r2c_cuda);
     m.impl("fft2_c2r", &fft2_c2r_cuda);
+    m.impl("fft_c2c_pruned", &fft_c2c_pruned_cuda);
+    m.impl("rfft2_modes", &rfft2_modes_cuda);
+    m.impl("irfft2_modes", &irfft2_modes_cuda);
 }
 
 // Importing spectral._C from Python runs this. Loading the shared library runs the

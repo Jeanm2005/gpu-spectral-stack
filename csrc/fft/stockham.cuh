@@ -209,87 +209,133 @@ __device__ __forceinline__ void stage(cf32* s, const cf32* __restrict__ table, i
 }
 
 // --- I/O policies ------------------------------------------------------------------------------
+//
+// Pruning (Task 1.7) lives here too: a policy can read fewer inputs than the transform has
+// (the rest are zero) or write fewer outputs, which saves the global-memory traffic of the modes
+// nobody needs. The stages always run at full size. Each policy keeps a fast path for the
+// unpruned case, where every row length is a compile-time constant.
 
 // `batch` contiguous complex transforms of N points: transform t is x[t * N, (t + 1) * N).
 // Consecutive threads read and write consecutive elements, so every access is coalesced.
+//
+// Pruned: rows of x hold only the first keep_in inputs (the others are zero), and rows of y only
+// the first keep_out outputs.
 struct C2cIo {
     const cf32* x;
     cf32* y;
     float scale;  // applied on the way out: 1/N for the inverse transform, else 1
+    int keep_in;
+    int keep_out;
 
     template <int N, int T>
     __device__ __forceinline__ void load(cf32* smem, int first, int count) const
     {
-        const std::size_t base = static_cast<std::size_t>(first) * N;
+        if (keep_in == N) {
+            const std::size_t base = static_cast<std::size_t>(first) * N;
+            for (int e = threadIdx.x; e < count * N; e += kThreads) {
+                smem[e] = x[base + e];
+            }
+            return;
+        }
+        const cf32* rows = x + static_cast<std::size_t>(first) * keep_in;
         for (int e = threadIdx.x; e < count * N; e += kThreads) {
-            smem[e] = x[base + e];
+            const int t = e / N;
+            const int i = e & (N - 1);
+            smem[e] = i < keep_in ? rows[t * keep_in + i] : cf32{0.0f, 0.0f};
         }
     }
 
     template <int N, int T>
     __device__ __forceinline__ void store(const cf32* smem, int first, int count) const
     {
-        const std::size_t base = static_cast<std::size_t>(first) * N;
-        for (int e = threadIdx.x; e < count * N; e += kThreads) {
-            y[base + e] = scaled(smem[e], scale);
+        if (keep_out == N) {
+            const std::size_t base = static_cast<std::size_t>(first) * N;
+            for (int e = threadIdx.x; e < count * N; e += kThreads) {
+                y[base + e] = scaled(smem[e], scale);
+            }
+            return;
+        }
+        cf32* rows = y + static_cast<std::size_t>(first) * keep_out;
+        for (int e = threadIdx.x; e < count * keep_out; e += kThreads) {
+            const int t = e / keep_out;
+            const int i = e - t * keep_out;
+            rows[e] = scaled(smem[t * N + i], scale);
         }
     }
 };
 
 // Real input (Task 1.5): `batch` rows of 2N reals, read as N complex values each (see real.cuh),
 // so the load is C2cIo's. After the forward N-point transform, the store combines Z[k] and
-// Z[N - k] from shared memory into the N + 1 outputs of the 2N-point real transform; row t of y
-// starts at t * (N + 1). The writes stay coalesced: consecutive threads, consecutive outputs.
+// Z[N - k] from shared memory into the outputs of the 2N-point real transform. The writes stay
+// coalesced: consecutive threads, consecutive outputs.
+//
+// keep is the number of outputs per row of y: N + 1 for the full half spectrum, fewer to prune.
 struct R2cIo {
     const cf32* x;
     cf32* y;
+    int keep;
 
     template <int N, int T>
     __device__ __forceinline__ void load(cf32* smem, int first, int count) const
     {
-        C2cIo{x, nullptr, 1.0f}.load<N, T>(smem, first, count);
+        C2cIo{x, nullptr, 1.0f, N, N}.load<N, T>(smem, first, count);
+    }
+
+    template <int N>
+    __device__ __forceinline__ void store_rows(const cf32* smem, int first, int count,
+                                               int row) const
+    {
+        cf32* rows = y + static_cast<std::size_t>(first) * row;
+        for (int e = threadIdx.x; e < count * row; e += kThreads) {
+            const int t = e / row;
+            const int k = e - t * row;
+            const cf32* z = smem + t * N;
+            const float k_over_n = static_cast<float>(k) / static_cast<float>(N);  // exact
+            rows[e] = real::r2c_combine(z[k & (N - 1)], z[(N - k) & (N - 1)], k_over_n);
+        }
     }
 
     template <int N, int T>
     __device__ __forceinline__ void store(const cf32* smem, int first, int count) const
     {
-        constexpr int kRow = N + 1;
-        const std::size_t base = static_cast<std::size_t>(first) * kRow;
-        for (int e = threadIdx.x; e < count * kRow; e += kThreads) {
-            const int t = e / kRow;  // a division by a constant: a multiply and a shift
-            const int k = e - t * kRow;
-            const cf32* z = smem + t * N;
-            const float k_over_n = static_cast<float>(k) / static_cast<float>(N);  // exact
-            y[base + e] = real::r2c_combine(z[k & (N - 1)], z[(N - k) & (N - 1)], k_over_n);
+        if (keep == N + 1) {
+            store_rows<N>(smem, first, count, N + 1);  // a constant: the division is cheap
+        } else {
+            store_rows<N>(smem, first, count, keep);
         }
     }
 };
 
-// Real output (Task 1.5): rows of N + 1 complex inputs X[0 .. N]; the load prepares Z[k] from
-// X[k] and X[N - k] (both reads are contiguous runs, one ascending, one descending), the kernel
-// runs the inverse N-point transform, and the store writes z, scaled by 1/N, as 2N reals.
+// Real output (Task 1.5): rows of complex inputs X[0 .. N]; the load prepares Z[k] from X[k] and
+// X[N - k] (both reads are contiguous runs, one ascending, one descending), the kernel runs the
+// inverse N-point transform, and the store writes z, scaled by 1/N, as 2N reals.
+//
+// keep is the number of inputs per row of x: N + 1, or fewer when the rest are zero.
 struct C2rIo {
     const cf32* x;
     cf32* y;
     float scale;  // 1/N
+    int keep;
 
     template <int N, int T>
     __device__ __forceinline__ void load(cf32* smem, int first, int count) const
     {
-        constexpr int kRow = N + 1;
+        const cf32 zero{0.0f, 0.0f};
         for (int e = threadIdx.x; e < count * N; e += kThreads) {
             const int t = e / N;
             const int k = e & (N - 1);
-            const cf32* row = x + static_cast<std::size_t>(first + t) * kRow;
+            const cf32* row = x + static_cast<std::size_t>(first + t) * keep;
+            const cf32 xk = k < keep ? row[k] : zero;
+            const cf32 xmk = N - k < keep ? row[N - k] : zero;
             const float k_over_n = static_cast<float>(k) / static_cast<float>(N);  // exact
-            smem[e] = real::c2r_prepare(row[k], row[N - k], k, k_over_n);
+            smem[e] = real::c2r_prepare(xk, xmk, k, k_over_n);
         }
     }
 
     template <int N, int T>
     __device__ __forceinline__ void store(const cf32* smem, int first, int count) const
     {
-        C2cIo{nullptr, y, scale}.store<N, T>(smem, first, count);
+        C2cIo{nullptr, y, scale, N, N}.store<N, T>(smem, first, count);
     }
 };
 
@@ -304,45 +350,61 @@ struct C2rIo {
 // of a warp (consecutive j, one i) would write addresses N apart, all in one bank; one extra
 // element per transform spreads them over the banks.
 //
-// x and y may be the same array: every block reads all of its columns before writing any, and no
-// two blocks share a column.
+// Pruned (Task 1.7), as an FNO keeps the lowest frequencies of each column: with m1_in > 0 the
+// arrays of x hold only 2 m1_in rows, frequencies 0 .. m1_in - 1 then N - m1_in .. N - 1 (the
+// rest are zero); with m1_out > 0 the arrays of y keep only those 2 m1_out rows. 0 means all N.
+//
+// x and y may be the same array when neither side is pruned: every block reads all of its
+// columns before writing any, and no two blocks share a column.
 struct StridedIo {
     static constexpr int kPad = 1;
     const cf32* x;
     cf32* y;
     int cols;
     float scale;
+    int m1_in;
+    int m1_out;
 
-    template <int N, int T>
-    __device__ __forceinline__ std::size_t offset(int first, int j, int i) const
+    // Element (row, column t) of arrays with `rows` rows.
+    __device__ __forceinline__ std::size_t offset(int t, int row, int rows) const
     {
-        const int t = first + j;
         const int slab = t / cols;
         const int col = t - slab * cols;
-        return (static_cast<std::size_t>(slab) * N + i) * static_cast<std::size_t>(cols) + col;
+        return (static_cast<std::size_t>(slab) * rows + row) * static_cast<std::size_t>(cols)
+               + col;
     }
 
     template <int N, int T>
     __device__ __forceinline__ void load(cf32* smem, int first, int count) const
     {
+        const int rows = m1_in > 0 ? 2 * m1_in : N;
         for (int e = threadIdx.x; e < T * N; e += kThreads) {
             const int i = e / T;  // T is a power of two: a shift
             const int j = e % T;
-            if (j < count) {
-                smem[j * (N + kPad) + i] = x[offset<N, T>(first, j, i)];
+            if (j >= count) {
+                continue;
             }
+            int row = i;  // where frequency i is stored, or -1 if it is not
+            if (m1_in > 0) {
+                row = i < m1_in ? i : (i >= N - m1_in ? i - (N - rows) : -1);
+            }
+            smem[j * (N + kPad) + i] =
+                row >= 0 ? x[offset(first + j, row, rows)] : cf32{0.0f, 0.0f};
         }
     }
 
     template <int N, int T>
     __device__ __forceinline__ void store(const cf32* smem, int first, int count) const
     {
-        for (int e = threadIdx.x; e < T * N; e += kThreads) {
-            const int i = e / T;
+        const int rows = m1_out > 0 ? 2 * m1_out : N;
+        for (int e = threadIdx.x; e < T * rows; e += kThreads) {
+            const int row = e / T;
             const int j = e % T;
-            if (j < count) {
-                y[offset<N, T>(first, j, i)] = scaled(smem[j * (N + kPad) + i], scale);
+            if (j >= count) {
+                continue;
             }
+            const int i = (m1_out > 0 && row >= m1_out) ? row + (N - rows) : row;  // frequency
+            y[offset(first + j, row, rows)] = scaled(smem[j * (N + kPad) + i], scale);
         }
     }
 };
@@ -424,52 +486,71 @@ void dispatch(int n, const Io& io, int batch, float sign, cudaStream_t stream)
 
 // --- Entry points ------------------------------------------------------------------------------
 
-inline void check_c2c(const cf32* x, const cf32* y, int n, int batch)
+inline void check_size(int n, const char* who)
 {
     if (n < 1 || n > kStockhamMaxN || (n & (n - 1)) != 0) {
-        throw std::invalid_argument("stockham: n must be a power of two from 1 to "
+        throw std::invalid_argument(std::string(who) + ": n must be a power of two from 1 to "
                                     + std::to_string(kStockhamMaxN) + ", got "
                                     + std::to_string(n));
     }
+}
+
+// Complex transforms of n points. keep (1 .. n) prunes the side that is in the frequency domain:
+// a forward transform writes only the first keep outputs of each transform, an inverse one reads
+// only the first keep inputs (the rest are zero). keep = n is the plain transform.
+template <int R, bool Table>
+void c2c(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream,
+         int keep)
+{
+    check_size(n, "stockham");
     if (batch < 1) {
         throw std::invalid_argument("stockham: batch must be at least 1, got "
                                     + std::to_string(batch));
     }
-    const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(batch);
-    if (x < y + total && y < x + total) {
+    if (keep < 1 || keep > n) {
+        throw std::invalid_argument("stockham: keep must be in [1, " + std::to_string(n)
+                                    + "], got " + std::to_string(keep));
+    }
+    const bool inverse = direction == Direction::Inverse;
+    const int row_in = inverse ? keep : n;
+    const int row_out = inverse ? n : keep;
+    const auto rows = static_cast<std::size_t>(batch);
+    if (x < y + rows * row_out && y < x + rows * row_in) {
         throw std::invalid_argument("stockham: x and y must not overlap (out-of-place only)");
     }
+    if (n == 1) {  // a 1-point DFT is the identity, in both directions
+        CUDA_CHECK(cudaMemcpyAsync(y, x, rows * sizeof(cf32), cudaMemcpyDeviceToDevice, stream));
+        return;
+    }
+    const float sign = inverse ? 1.0f : -1.0f;
+    const float scale = inverse ? 1.0f / static_cast<float>(n) : 1.0f;  // exact: n = 2^k
+    dispatch<R, Table>(n, C2cIo{x, y, scale, row_in, row_out}, batch, sign, stream);
 }
 
 template <int R, bool Table>
 void c2c(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream)
 {
-    check_c2c(x, y, n, batch);
-    if (n == 1) {  // a 1-point DFT is the identity, in both directions
-        const std::size_t bytes = static_cast<std::size_t>(batch) * sizeof(cf32);
-        CUDA_CHECK(cudaMemcpyAsync(y, x, bytes, cudaMemcpyDeviceToDevice, stream));
-        return;
-    }
-    const bool inverse = direction == Direction::Inverse;
-    const float sign = inverse ? 1.0f : -1.0f;
-    const float scale = inverse ? 1.0f / static_cast<float>(n) : 1.0f;  // exact: n = 2^k
-    dispatch<R, Table>(n, C2cIo{x, y, scale}, batch, sign, stream);
+    c2c<R, Table>(x, y, n, batch, direction, stream, n);
 }
 
+// Column transforms; m1_in / m1_out > 0 prune the rows as StridedIo describes.
 template <int R, bool Table>
 void columns(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction,
-             cudaStream_t stream)
+             cudaStream_t stream, int m1_in, int m1_out)
 {
-    if (n < 1 || n > kStockhamMaxN || (n & (n - 1)) != 0) {
-        throw std::invalid_argument("stockham columns: n must be a power of two from 1 to "
-                                    + std::to_string(kStockhamMaxN) + ", got "
-                                    + std::to_string(n));
-    }
+    check_size(n, "stockham columns");
     if (cols < 1 || slabs < 1 || static_cast<long long>(cols) * slabs > INT_MAX) {
         throw std::invalid_argument("stockham columns: need 1 <= cols * slabs <= INT_MAX");
     }
+    if (m1_in < 0 || m1_out < 0 || 2 * m1_in > n || 2 * m1_out > n) {
+        throw std::invalid_argument("stockham columns: need 0 <= 2 m1 <= n = "
+                                    + std::to_string(n));
+    }
+    if ((m1_in > 0 || m1_out > 0) && x == y) {
+        throw std::invalid_argument("stockham columns: a pruned transform cannot run in place");
+    }
     const int batch = cols * slabs;
-    if (n == 1) {
+    if (n == 1) {  // m1_in = m1_out = 0
         if (x != y) {
             const std::size_t bytes = static_cast<std::size_t>(batch) * sizeof(cf32);
             CUDA_CHECK(cudaMemcpyAsync(y, x, bytes, cudaMemcpyDeviceToDevice, stream));
@@ -479,37 +560,89 @@ void columns(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direc
     const bool inverse = direction == Direction::Inverse;
     const float sign = inverse ? 1.0f : -1.0f;
     const float scale = inverse ? 1.0f / static_cast<float>(n) : 1.0f;
-    dispatch<R, Table>(n, StridedIo{x, y, cols, scale}, batch, sign, stream);
+    dispatch<R, Table>(n, StridedIo{x, y, cols, scale, m1_in, m1_out}, batch, sign, stream);
+}
+
+template <int R, bool Table>
+void columns(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction,
+             cudaStream_t stream)
+{
+    columns<R, Table>(x, y, n, cols, slabs, direction, stream, 0, 0);
 }
 
 // Real transforms of n = 2m points run one m-point kernel each, so n goes up to 2 * 4096.
 constexpr int kRealMaxN = 2 * kStockhamMaxN;
 
+inline void check_keep(int keep, int n, const char* who)
+{
+    if (keep < 1 || keep > n / 2 + 1) {
+        throw std::invalid_argument(std::string(who) + ": keep must be in [1, n/2 + 1 = "
+                                    + std::to_string(n / 2 + 1) + "], got "
+                                    + std::to_string(keep));
+    }
+}
+
+// keep (1 .. n/2 + 1): the number of complex values per row of y.
 template <int R, bool Table>
-void r2c(const float* x, cf32* y, int n, int batch, cudaStream_t stream)
+void r2c(const float* x, cf32* y, int n, int batch, cudaStream_t stream, int keep)
 {
     real::check_arguments(x, y, n, batch, kRealMaxN, "stockham r2c");
+    check_keep(keep, n, "stockham r2c");
     const int m = n / 2;
     const auto* z = reinterpret_cast<const cf32*>(x);  // n reals are m complex values
     if (m == 1) {  // a 1-point DFT is the identity: only the combine step is left
-        real::r2c_postprocess(z, y, 1, batch, stream);
+        real::r2c_postprocess(z, y, 1, batch, keep, stream);
         return;
     }
-    dispatch<R, Table>(m, R2cIo{z, y}, batch, -1.0f, stream);
+    dispatch<R, Table>(m, R2cIo{z, y, keep}, batch, -1.0f, stream);
+}
+
+template <int R, bool Table>
+void r2c(const float* x, cf32* y, int n, int batch, cudaStream_t stream)
+{
+    r2c<R, Table>(x, y, n, batch, stream, n / 2 + 1);
+}
+
+// keep (1 .. n/2 + 1): the number of complex values per row of x; the rest are zero.
+template <int R, bool Table>
+void c2r(const cf32* x, float* y, int n, int batch, cudaStream_t stream, int keep)
+{
+    real::check_arguments(y, x, n, batch, kRealMaxN, "stockham c2r");
+    check_keep(keep, n, "stockham c2r");
+    const int m = n / 2;
+    auto* z = reinterpret_cast<cf32*>(y);
+    if (m == 1) {
+        real::c2r_preprocess(x, z, 1, batch, keep, stream);
+        return;
+    }
+    const float scale = 1.0f / static_cast<float>(m);  // exact: m = 2^k
+    dispatch<R, Table>(m, C2rIo{x, z, scale, keep}, batch, 1.0f, stream);
 }
 
 template <int R, bool Table>
 void c2r(const cf32* x, float* y, int n, int batch, cudaStream_t stream)
 {
-    real::check_arguments(y, x, n, batch, kRealMaxN, "stockham c2r");
-    const int m = n / 2;
-    auto* z = reinterpret_cast<cf32*>(y);
-    if (m == 1) {
-        real::c2r_preprocess(x, z, 1, batch, stream);
-        return;
-    }
-    const float scale = 1.0f / static_cast<float>(m);  // exact: m = 2^k
-    dispatch<R, Table>(m, C2rIo{x, z, scale}, batch, 1.0f, stream);
+    c2r<R, Table>(x, y, n, batch, stream, n / 2 + 1);
+}
+
+// The pruned entry points of one variant, for the registry (registry.hpp).
+template <int R, bool Table>
+constexpr PrunedFns pruned_fns()
+{
+    return {
+        [](const cf32* x, cf32* y, int n, int batch, int keep, Direction direction,
+           cudaStream_t stream) { c2c<R, Table>(x, y, n, batch, direction, stream, keep); },
+        [](const float* x, cf32* y, int n, int batch, int keep, cudaStream_t stream) {
+            r2c<R, Table>(x, y, n, batch, stream, keep);
+        },
+        [](const cf32* x, float* y, int n, int batch, int keep, cudaStream_t stream) {
+            c2r<R, Table>(x, y, n, batch, stream, keep);
+        },
+        [](const cf32* x, cf32* y, int n, int cols, int slabs, int m1_in, int m1_out,
+           Direction direction, cudaStream_t stream) {
+            columns<R, Table>(x, y, n, cols, slabs, direction, stream, m1_in, m1_out);
+        },
+    };
 }
 
 }  // namespace spectral::fft::stockham

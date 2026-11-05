@@ -10,6 +10,10 @@
 // exceeds `total` are skipped). Our implementations appear once per column method, as
 // "<impl>/strided" and "<impl>/transpose" (fft/fft2d.hpp).
 //
+// Pruned 2D rows (rfft2_modes, irfft2_modes) use the same arrays and keep m1 = m2 = n/8 modes
+// along each axis (at least 1), an FNO-like fraction. cuFFT has no pruned transform, so its row
+// is the full transform plus our gather (or scatter) of the modes: "cufft+gather".
+//
 // A row whose slowest round is more than 5 % slower than its fastest gets a warning on stderr:
 // on this laptop that almost always means the GPU clock is not locked (docs/DEVELOPMENT.md).
 
@@ -19,6 +23,7 @@
 #include "common/fft_plan.hpp"
 #include "common/types.hpp"
 #include "fft/fft2d.hpp"
+#include "fft/pruned.hpp"
 #include "fft/registry.hpp"
 #include "ops/scale.hpp"
 
@@ -41,7 +46,7 @@ constexpr double kUnstableSpread = 0.05;  // max_ms / min_ms - 1 above this gets
 const char* const kUsage =
     "usage: spectral_bench [options]\n"
     "  --op NAME       all (default), fft_c2c, fft_r2c, fft_c2r, fft2_c2c, fft2_r2c,\n"
-    "                  fft2_c2r, or scale\n"
+    "                  fft2_c2r, rfft2_modes, irfft2_modes, or scale\n"
     "  --impl NAME     all (default), cufft, ours (the scale kernel), or one of our FFTs\n"
     "  --sizes LIST    comma-separated transform sizes (default: 2,4,...,4096)\n"
     "  --total N       points per row; batch = total / n (default: 16777216)\n"
@@ -133,7 +138,8 @@ Options parse_options(int argc, char** argv)
     const bool known_op =
         options.op == "all" || options.op == "fft_c2c" || options.op == "fft_r2c"
         || options.op == "fft_c2r" || options.op == "fft2_c2c" || options.op == "fft2_r2c"
-        || options.op == "fft2_c2r" || options.op == "scale";
+        || options.op == "fft2_c2r" || options.op == "rfft2_modes"
+        || options.op == "irfft2_modes" || options.op == "scale";
     if (!known_op) {
         usage_error("unknown --op " + options.op);
     }
@@ -377,6 +383,61 @@ void bench_fft2(const Options& options, const std::string& op, const cf32* x, cf
     }
 }
 
+// Pruned 2D real transforms of square n x n arrays (see the top of this file).
+void bench_modes(const Options& options, const std::string& op, const cf32* x, cf32* y,
+                 cf32* work, cudaStream_t stream, std::ostream& os, bool progress)
+{
+    const bool forward = op == "rfft2_modes";
+    for (const long long n : options.sizes) {
+        if (n < 2 || n * n > options.total) {
+            continue;
+        }
+        const long long batch = options.total / (n * n);
+        const long long m = std::max(1LL, n / 8);
+        const int ni = static_cast<int>(n);
+        const int mi = static_cast<int>(m);
+        const int bi = static_cast<int>(batch);
+        const Work w = fft2_modes_work(n, n, m, m, batch);
+        const auto* x_real = reinterpret_cast<const float*>(x);
+        auto* y_real = reinterpret_cast<float*>(y);
+
+        if (options.wants("cufft")) {
+            FftPlan plan(ni, ni, bi, forward ? CUFFT_R2C : CUFFT_C2R);
+            CUFFT_CHECK(cufftSetStream(plan.get(), stream));
+            auto* full = reinterpret_cast<cufftComplex*>(work);
+            const Timing t = time_kernel(
+                [&](cudaStream_t s) {
+                    if (forward) {
+                        CUFFT_CHECK(cufftExecR2C(plan.get(), const_cast<float*>(x_real), full));
+                        spectral::fft::gather_modes(work, y, ni, ni / 2 + 1, mi, mi, bi, s);
+                    } else {
+                        spectral::fft::scatter_modes(x, work, ni, ni / 2 + 1, mi, mi, bi, s);
+                        CUFFT_CHECK(cufftExecC2R(plan.get(), full, y_real));
+                    }
+                },
+                stream, options.timing);
+            write_row(os, {op.c_str(), forward ? "cufft+gather" : "cufft+scatter", n, batch, t, w},
+                      progress);
+        }
+
+        for (const spectral::fft::FftImpl& impl : spectral::fft::kFftImpls) {
+            if (!options.wants(impl.name) || n > impl.max_n) {
+                continue;
+            }
+            const Timing t = time_kernel(
+                [&](cudaStream_t s) {
+                    if (forward) {
+                        spectral::fft::rfft2_modes(impl, x_real, y, ni, ni, mi, mi, bi, work, s);
+                    } else {
+                        spectral::fft::irfft2_modes(impl, x, y_real, ni, ni, mi, mi, bi, work, s);
+                    }
+                },
+                stream, options.timing);
+            write_row(os, {op.c_str(), impl.name, n, batch, t, w}, progress);
+        }
+    }
+}
+
 // A pure bandwidth reference: one read and one write per point, two multiplies.
 void bench_scale(const Options& options, const cf32* x, cf32* y, cudaStream_t stream,
                  std::ostream& os, bool progress)
@@ -435,6 +496,11 @@ int main(int argc, char** argv)
         for (const char* op : {"fft2_c2c", "fft2_r2c", "fft2_c2r"}) {
             if (options.op == "all" || options.op == op) {
                 bench_fft2(options, op, x.get(), y.get(), work.get(), stream, os, progress);
+            }
+        }
+        for (const char* op : {"rfft2_modes", "irfft2_modes"}) {
+            if (options.op == "all" || options.op == op) {
+                bench_modes(options, op, x.get(), y.get(), work.get(), stream, os, progress);
             }
         }
         if ((options.op == "all" || options.op == "scale") && options.wants("ours")) {

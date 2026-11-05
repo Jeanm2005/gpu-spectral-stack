@@ -81,3 +81,34 @@ def irfft2(x: torch.Tensor, n2: int, *, impl: str = "naive", columns: str = "aut
     shape (..., n1, n2).
     """
     return torch.ops.spectral.fft2_c2r.default(x, n2, impl, columns)
+
+
+# Pruned transforms (Task 1.7): only the low-frequency modes an FNO spectral convolution keeps.
+# The Stockham implementations prune inside their kernels; the others compute the full transform
+# and gather (or scatter) the modes, with the same results. Layouts match spectral.reference.
+
+
+def fft_truncated(x: torch.Tensor, k: int, *, impl: str = "naive") -> torch.Tensor:
+    """The first k outputs of fft_c2c(x): (..., n) complex64 -> (..., k)."""
+    return torch.ops.spectral.fft_c2c_pruned.default(x, x.shape[-1], k, False, impl)
+
+
+def ifft_from_modes(modes: torch.Tensor, n: int, *, impl: str = "naive") -> torch.Tensor:
+    """Inverse FFT of n points whose first k = modes.shape[-1] inputs are `modes` and the rest
+    zero: (..., k) complex64 -> (..., n), divided by n."""
+    return torch.ops.spectral.fft_c2c_pruned.default(modes, n, modes.shape[-1], True, impl)
+
+
+def rfft2_truncated(x: torch.Tensor, m1: int, m2: int, *, impl: str = "naive") -> torch.Tensor:
+    """The low-frequency modes of rfft2(x): (..., n1, n2) float32 -> (..., 2 m1, m2) complex64,
+    rows 0 .. m1-1 then n1-m1 .. n1-1, columns 0 .. m2-1 (spectral.reference.rfft2_truncate)."""
+    return torch.ops.spectral.rfft2_modes.default(x, m1, m2, impl)
+
+
+def irfft2_from_modes(
+    modes: torch.Tensor, shape: tuple[int, int], *, impl: str = "naive"
+) -> torch.Tensor:
+    """Inverse of rfft2_truncated: (..., 2 m1, m2) complex64 -> (..., n1, n2) float32, every
+    dropped mode taken as zero (spectral.reference.irfft2_from_modes)."""
+    n1, n2 = shape
+    return torch.ops.spectral.irfft2_modes.default(modes, n1, n2, impl)

@@ -30,4 +30,6 @@ void columns_stockham_r8_table(const cf32* x, cf32* y, int n, int cols, int slab
     stockham::columns<8, true>(x, y, n, cols, slabs, direction, stream);
 }
 
+const PrunedFns pruned_stockham_r8_table = stockham::pruned_fns<8, true>();
+
 }  // namespace spectral::fft

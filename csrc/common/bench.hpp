@@ -60,3 +60,8 @@ Work fft_real_work(long long n, long long batch);
 // complex side of a real transform holds n1 (n2/2 + 1) values).
 Work fft2_c2c_work(long long n1, long long n2, long long batch);
 Work fft2_real_work(long long n1, long long n2, long long batch);
+
+// The pruned 2D real transform (either direction) keeping 2 m1 x m2 modes: the flops of the full
+// transform, so its GFLOP/s compare with fft2_real_work's, but only the bytes it must move, the
+// real array and the modes.
+Work fft2_modes_work(long long n1, long long n2, long long m1, long long m2, long long batch);

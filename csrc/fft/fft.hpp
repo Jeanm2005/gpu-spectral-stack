@@ -55,4 +55,27 @@ namespace spectral::fft {
     void columns_stockham_r4(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction, cudaStream_t stream);
     void columns_stockham_r8(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction, cudaStream_t stream);
     void columns_stockham_r8_table(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction, cudaStream_t stream);
+
+    // Pruned transforms (Task 1.7), for implementations that prune inside their kernels:
+    //   c2c      forward: only the first `keep` outputs per transform; inverse: only the first
+    //            `keep` inputs (the rest are zero). Rows hold keep values on the pruned side.
+    //   r2c      only the first `keep` of the n/2 + 1 outputs per transform
+    //   c2r      only the first `keep` of the n/2 + 1 inputs (the rest are zero)
+    //   columns  only the 2 m1 lowest-frequency rows (0 .. m1-1, then n-m1 .. n-1) on the input
+    //            (m1_in) or output (m1_out) side; 0 means all n rows. Not in place.
+    // Other implementations prune by gathering from, or scattering into, a full transform
+    // (pruned.cu).
+    struct PrunedFns {
+        void (*c2c)(const cf32* x, cf32* y, int n, int batch, int keep, Direction direction,
+                    cudaStream_t stream);
+        void (*r2c)(const float* x, cf32* y, int n, int batch, int keep, cudaStream_t stream);
+        void (*c2r)(const cf32* x, float* y, int n, int batch, int keep, cudaStream_t stream);
+        void (*columns)(const cf32* x, cf32* y, int n, int cols, int slabs, int m1_in,
+                        int m1_out, Direction direction, cudaStream_t stream);
+    };
+
+    extern const PrunedFns pruned_stockham_r2;
+    extern const PrunedFns pruned_stockham_r4;
+    extern const PrunedFns pruned_stockham_r8;
+    extern const PrunedFns pruned_stockham_r8_table;
 }

@@ -23,6 +23,7 @@ SOURCES = [
     "csrc/ops/scale.cu",
     "csrc/fft/fft2d.cu",
     "csrc/fft/naive.cu",
+    "csrc/fft/pruned.cu",
     "csrc/fft/real.cu",
     "csrc/fft/stockham_r2.cu",
     "csrc/fft/stockham_r4.cu",

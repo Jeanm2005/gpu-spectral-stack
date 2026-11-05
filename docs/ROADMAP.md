@@ -32,7 +32,7 @@ Conventions
 - [ ] 1.4 (optional) Multi-block FFT for N beyond shared memory (four-step algorithm)
 - [X] 1.5 Real-to-complex (R2C) and complex-to-real (C2R) through the N/2-point complex trick
 - [X] 1.6 2D FFT: row transforms then column transforms (transpose vs strided), rfft2/irfft2
-- [ ] 1.7 Pruned transforms: forward that outputs only the first k modes, inverse that
+- [X] 1.7 Pruned transforms: forward that outputs only the first k modes, inverse that
       reads only k non-zero modes
 - [ ] 1.8 Results: table against cuFFT by size and batch, roofline, profiling log, README
 - [ ] 1.9 In gpu-rf-pipeline: `--fft-impl custom`, window functions, overlap-save FIR,

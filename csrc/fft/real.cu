@@ -26,11 +26,11 @@ unsigned blocks_for(std::size_t threads)
     return static_cast<unsigned>(std::min((threads + kBlock - 1) / kBlock, kMaxBlocks));
 }
 
-// One thread per output: t = row, k = 0 .. m.
+// One thread per output: t = row, k = 0 .. keep-1.
 __global__ void r2c_post_kernel(const cf32* __restrict__ z, cf32* __restrict__ y, int m,
-                                std::size_t total)
+                                int keep, std::size_t total)
 {
-    const std::size_t row_len = static_cast<std::size_t>(m) + 1;
+    const auto row_len = static_cast<std::size_t>(keep);
     const float inv_m = 1.0f / static_cast<float>(m);  // exact: m = 2^p
     const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
     for (std::size_t e = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -43,35 +43,38 @@ __global__ void r2c_post_kernel(const cf32* __restrict__ z, cf32* __restrict__ y
     }
 }
 
-// One thread per prepared value: t = row, k = 0 .. m-1.
+// One thread per prepared value: t = row, k = 0 .. m-1. Rows of x hold `keep` inputs.
 __global__ void c2r_pre_kernel(const cf32* __restrict__ x, cf32* __restrict__ z, int m,
-                               std::size_t total)
+                               int keep, std::size_t total)
 {
-    const std::size_t row_len = static_cast<std::size_t>(m) + 1;
+    const auto row_len = static_cast<std::size_t>(keep);
     const float inv_m = 1.0f / static_cast<float>(m);
+    const cf32 zero{0.0f, 0.0f};
     const std::size_t stride = static_cast<std::size_t>(gridDim.x) * blockDim.x;
     for (std::size_t e = static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
          e < total; e += stride) {
         const std::size_t t = e / static_cast<std::size_t>(m);
         const int k = static_cast<int>(e - t * static_cast<std::size_t>(m));
         const cf32* row = x + t * row_len;
-        z[e] = c2r_prepare(row[k], row[m - k], k, static_cast<float>(k) * inv_m);
+        const cf32 xk = k < keep ? row[k] : zero;
+        const cf32 xmk = m - k < keep ? row[m - k] : zero;
+        z[e] = c2r_prepare(xk, xmk, k, static_cast<float>(k) * inv_m);
     }
 }
 
 }  // namespace
 
-void r2c_postprocess(const cf32* z, cf32* y, int m, int batch, cudaStream_t stream)
+void r2c_postprocess(const cf32* z, cf32* y, int m, int batch, int keep, cudaStream_t stream)
 {
-    const std::size_t total = static_cast<std::size_t>(batch) * (static_cast<std::size_t>(m) + 1);
-    r2c_post_kernel<<<blocks_for(total), kBlock, 0, stream>>>(z, y, m, total);
+    const std::size_t total = static_cast<std::size_t>(batch) * static_cast<std::size_t>(keep);
+    r2c_post_kernel<<<blocks_for(total), kBlock, 0, stream>>>(z, y, m, keep, total);
     CUDA_CHECK(cudaGetLastError());
 }
 
-void c2r_preprocess(const cf32* x, cf32* z, int m, int batch, cudaStream_t stream)
+void c2r_preprocess(const cf32* x, cf32* z, int m, int batch, int keep, cudaStream_t stream)
 {
     const std::size_t total = static_cast<std::size_t>(batch) * static_cast<std::size_t>(m);
-    c2r_pre_kernel<<<blocks_for(total), kBlock, 0, stream>>>(x, z, m, total);
+    c2r_pre_kernel<<<blocks_for(total), kBlock, 0, stream>>>(x, z, m, keep, total);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -108,7 +111,7 @@ void r2c_via_c2c(C2cFn c2c, const float* x, cf32* y, int n, int batch, cf32* wor
     }
     const int m = n / 2;
     c2c(reinterpret_cast<const cf32*>(x), work, m, batch, Direction::Forward, stream);
-    real::r2c_postprocess(work, y, m, batch, stream);
+    real::r2c_postprocess(work, y, m, batch, m + 1, stream);
 }
 
 void c2r_via_c2c(C2cFn c2c, const cf32* x, float* y, int n, int batch, cf32* work,
@@ -119,7 +122,7 @@ void c2r_via_c2c(C2cFn c2c, const cf32* x, float* y, int n, int batch, cf32* wor
         throw std::invalid_argument("c2r: this implementation needs a workspace");
     }
     const int m = n / 2;
-    real::c2r_preprocess(x, work, m, batch, stream);
+    real::c2r_preprocess(x, work, m, batch, m + 1, stream);
     c2c(work, reinterpret_cast<cf32*>(y), m, batch, Direction::Inverse, stream);
 }
 
