@@ -15,7 +15,9 @@ def test_operator_is_registered():
 
 def test_fft_implementations_come_from_the_cpp_registry():
     assert spectral.FFT_IMPLS[0] == "naive"
-    assert {"stockham_r2", "stockham_r4"} <= set(spectral.FFT_IMPLS)
+    assert {"stockham_r2", "stockham_r4", "stockham_r8", "stockham_r8_table"} <= set(
+        spectral.FFT_IMPLS
+    )
 
 
 # 255/256/257 straddle one block of 256 threads; 2^20 needs many blocks.

@@ -38,9 +38,14 @@ jobs:
           ./actionlint -color
 
   cuda:
-    name: Build (CUDA 13.4)
+    name: Build (CUDA 13.4, sm_${{ matrix.arch }})
     runs-on: ubuntu-24.04
     container: nvidia/cuda:13.4.3-devel-ubuntu26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every architecture CUDA 13 supports: Turing through Blackwell.
+        arch: ["75", "80", "86", "89", "90", "100", "120"]
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +57,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_CUDA_ARCHITECTURES=120
+          -DCMAKE_CUDA_ARCHITECTURES=${{ matrix.arch }}
           -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 
       - name: Build
@@ -89,3 +94,24 @@ jobs:
 
       - name: Run the tests (GPU tests skip)
         run: pytest -q
+
+  results:
+    name: Figures and README tables from the committed results
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install plotting dependencies
+        run: pip install numpy matplotlib
+
+      # Drawing proves the committed data still parses and every figure still renders; the PNGs
+      # themselves are not compared (fonts and library versions change pixels).
+      - name: Redraw the figures
+        run: python tools/make_figures.py --figures "$RUNNER_TEMP/figures"
+
+      - name: README tables match the committed results
+        run: python tools/results_table.py --check

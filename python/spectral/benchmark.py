@@ -68,6 +68,12 @@ def fft_c2c_work(n: int, batch: int) -> tuple[float, float]:
     return 5.0 * points * math.log2(n), 16.0 * points
 
 
+def fft_real_work(n: int, batch: int) -> tuple[float, float]:
+    """(flops, bytes) of `batch` real transforms of n points, either direction, by the same
+    convention: 2.5 n log2 n flops, n float32 values plus n/2 + 1 complex64 values moved."""
+    return 2.5 * n * batch * math.log2(n), batch * (4.0 * n + 8.0 * (n / 2 + 1))
+
+
 def format_csv(results: Iterable[Result], comments: Iterable[str]) -> str:
     lines = [f"# {c}" for c in comments]
     lines.append(",".join(CSV_COLUMNS))

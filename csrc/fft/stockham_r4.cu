@@ -1,0 +1,33 @@
+// Stockham FFT, radix 4 (a final radix-2 stage when log2 N is odd), twiddles computed
+// with sincospif.
+// The kernels themselves are in stockham.cuh.
+
+#include "fft/stockham.cuh"
+
+namespace spectral::fft {
+
+void c2c_stockham_r4(const cf32* x, cf32* y, int n, int batch, Direction direction,
+                     cudaStream_t stream)
+{
+    stockham::c2c<4, false>(x, y, n, batch, direction, stream);
+}
+
+void r2c_stockham_r4(const float* x, cf32* y, int n, int batch, cf32* /*work*/, cudaStream_t stream)
+{
+    stockham::r2c<4, false>(x, y, n, batch, stream);
+}
+
+void c2r_stockham_r4(const cf32* x, float* y, int n, int batch, cf32* /*work*/, cudaStream_t stream)
+{
+    stockham::c2r<4, false>(x, y, n, batch, stream);
+}
+
+void columns_stockham_r4(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction,
+                         cudaStream_t stream)
+{
+    stockham::columns<4, false>(x, y, n, cols, slabs, direction, stream);
+}
+
+const PrunedFns pruned_stockham_r4 = stockham::pruned_fns<4, false>();
+
+}  // namespace spectral::fft

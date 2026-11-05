@@ -28,14 +28,23 @@ PyTorch's CUDA major version must match nvcc's (13 and 13); a minor difference o
 
 ```bash
 source .venv/bin/activate
+git switch -c phase-2-solver        # work happens on a branch; main is protected
 # edit
 tools/check_local.sh     # actionlint, ruff, C++ build, smoke tests, extension, every test
-git commit ...
-git push
+git commit ...           # one commit per roadmap task
+git push -u origin HEAD
+gh pr create --base main            # CI runs on the pull request
+gh pr merge --merge                 # once CI passes; a merge commit, never squash
 ```
 
 `check_local.sh` runs everything CI runs plus the GPU tests CI cannot run; a commit that has not
 passed it locally does not get pushed.
+
+`main` is protected by a repository ruleset: changes arrive only through pull requests, every CI
+job must pass before a merge, and force-pushes and deletion are blocked. Merge with a merge
+commit (or a rebase), not a squash: each task's commit then lands on `main` as its own commit,
+which is also what GitHub counts as a contribution (commits on other branches do not count until
+they reach the default branch).
 
 Rebuilding: `cmake --build build -j` after C++/CUDA changes for the command-line tools, and
 `pip install -e . --no-build-isolation` after any change under `csrc/` for the Python extension.
@@ -52,8 +61,8 @@ Edits to `.py` files take effect immediately.
 
 ## Benchmarks
 
-This laptop's GPU changes speed on its own in three ways, each of which has already corrupted a
-run here. Before any benchmark that will be compared or committed:
+This laptop's GPU changes speed on its own, and that has already corrupted runs here. Before any
+benchmark that will be compared or committed:
 
 1. **On the charger.** On battery the GPU's power limit drops to about 55 W; the core clock then
    collapses to 200-300 MHz under load and the memory clock to 9001 MHz. Plugged in, the limit
@@ -64,4 +73,76 @@ run here. Before any benchmark that will be compared or committed:
    administrator** (the lock is impossible from WSL, and a reboot clears it):
 
    ```powershell
-   nvidia-smi -lgc 1200,1200     # must
+   nvidia-smi -lgc 1200,1200     # lock; undo with:  nvidia-smi -rgc   (a reboot also resets it)
+   ```
+
+   Check the lock holds under load: the core clock should stay flat (about 1130 MHz here) while
+   a benchmark runs.
+
+   ```bash
+   ./build/spectral_bench --op fft_c2c --impl cufft --sizes 512 --warmup 0 --rounds 1000 > /dev/null &
+   timeout 8 nvidia-smi --query-gpu=clocks.sm,power.draw,clocks_event_reasons.active --format=csv -lms 200
+   wait
+   ```
+
+   If it drifts, lock lower (`-lgc 1100,1100`) and re-measure the peaks too.
+3. **Nothing else on the GPU** (games, video).
+
+Then:
+
+```bash
+./build/spectral_bench --out out/bench.csv
+python tools/bench_compare.py docs/results/bench.csv out/bench.csv
+```
+
+Under the lock, consecutive runs agree to within 0.5 %, so a 10 % regression threshold flags only
+real changes. `spectral_bench --help` lists the operations; `--op` and `--impl` narrow a run, and
+`--batches 1,8,64` replaces the default batch (2^24 points per launch) with fixed batch counts.
+
+`docs/results/` holds the committed baseline. Update it only in a commit whose purpose includes
+the performance change, and paste the `bench_compare` output into that commit message. Every
+committed number, the peaks included, must come from the same clock lock. A full refresh of the
+committed results, figures, and README tables:
+
+```bash
+./build/spectral_peaks --out docs/results/peaks.json
+./build/spectral_bench --out docs/results/bench.csv
+./build/spectral_bench --op fft_c2c --sizes 64,1024,4096 --batches 1,8,64,512,4096 \
+    --out docs/results/bench_batch.csv
+python bench/bench_torch.py --out docs/results/bench_torch.csv
+python tools/make_figures.py
+python tools/results_table.py
+```
+
+## Profiling with Nsight Compute
+
+Under WSL2, the GPU performance counters must first be enabled on Windows: NVIDIA Control Panel →
+Desktop menu → Enable Developer Settings, then Developer → Manage GPU Performance Counters →
+"Allow access to the GPU performance counters to all users". Without it, `ncu` reports
+`ERR_NVGPUCTRPERM`.
+
+```bash
+tools/profile_kernels.sh                        # default cases
+tools/profile_kernels.sh fft_c2c naive 1024     # one case
+```
+
+Reports go to `docs/profiles/`. `--set full` replays each kernel dozens of times to collect
+every metric, so a run takes a while. Device code is built with `-lineinfo`, so the Source page
+of a report maps stalls to lines of our kernels. What the reports showed is written up in
+docs/PROFILING.md.
+
+## Roofline and figures
+
+```bash
+./build/spectral_peaks --out docs/results/peaks.json   # measured ceilings, under the clock lock
+python tools/make_figures.py                           # docs/figures/*.png, light and dark
+python tools/results_table.py                          # the README's tables against cuFFT
+```
+
+## Continuous integration
+
+GitHub-hosted runners have no GPU. CI runs ruff and actionlint; builds the C++/CUDA code with
+warnings as errors for every target architecture (compute capability 7.5 through 12.0); builds
+the PyTorch extension against the CUDA 13.0 wheels and runs every test not marked `gpu`; and
+redraws the figures and README tables from the committed results, failing if the README is out
+of date. Check a workflow change locally with `actionlint` before pushing.

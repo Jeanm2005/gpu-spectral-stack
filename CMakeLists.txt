@@ -34,8 +34,15 @@ set(SPECTRAL_COMPILE_OPTIONS
 add_library(spectral_core STATIC
   csrc/common/bench.cpp
   csrc/ops/scale.cu
+  csrc/fft/fft2d.cu
   csrc/fft/naive.cu
-  csrc/fft/stockham.cu
+  csrc/fft/pruned.cu
+  csrc/fft/real.cu
+  csrc/fft/stockham_r2.cu
+  csrc/fft/stockham_r4.cu
+  csrc/fft/stockham_r8.cu
+  csrc/fft/stockham_r8_table.cu
+  csrc/fft/twiddles.cu
 )
 target_include_directories(spectral_core PUBLIC csrc)
 target_link_libraries(spectral_core PUBLIC CUDA::cudart CUDA::cufft)

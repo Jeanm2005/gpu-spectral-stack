@@ -41,4 +41,11 @@ profile fft_c2c naive 4096
 profile fft_c2c stockham_r2 4096
 profile fft_c2c stockham_r4 4096
 profile fft_c2c stockham_r4 256
+profile fft_c2c stockham_r8 4096
+profile fft_c2c stockham_r8_table 4096
+profile fft_r2c stockham_r8 4096
+profile fft_r2c cufft 4096
+profile fft2_r2c stockham_r8 1024        # both column methods: rows, strided columns, transposes
+profile fft2_r2c cufft 1024
+profile rfft2_modes stockham_r8 256
 profile scale ours 16777216

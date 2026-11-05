@@ -98,3 +98,39 @@ Work fft_c2c_work(long long n, long long batch)
     w.bytes = 2.0 * 8.0 * points;  // one complex64 (8 bytes) read and one written per point
     return w;
 }
+
+Work fft_real_work(long long n, long long batch)
+{
+    const double rows = static_cast<double>(batch);
+    const double real_n = static_cast<double>(n);
+    Work w;
+    w.flops = 2.5 * real_n * rows * std::log2(real_n);
+    w.bytes = rows * (4.0 * real_n + 8.0 * (real_n / 2.0 + 1.0));  // float32 + complex64 sides
+    return w;
+}
+
+Work fft2_c2c_work(long long n1, long long n2, long long batch)
+{
+    return fft_c2c_work(n1 * n2, batch);
+}
+
+Work fft2_real_work(long long n1, long long n2, long long batch)
+{
+    const double points = static_cast<double>(n1) * static_cast<double>(n2);
+    const double arrays = static_cast<double>(batch);
+    Work w;
+    w.flops = 2.5 * points * arrays * std::log2(points);
+    w.bytes = arrays
+              * (4.0 * points + 8.0 * static_cast<double>(n1) * (static_cast<double>(n2) / 2 + 1));
+    return w;
+}
+
+Work fft2_modes_work(long long n1, long long n2, long long m1, long long m2, long long batch)
+{
+    Work w = fft2_real_work(n1, n2, batch);
+    const double arrays = static_cast<double>(batch);
+    w.bytes = arrays
+              * (4.0 * static_cast<double>(n1) * static_cast<double>(n2)
+                 + 8.0 * 2.0 * static_cast<double>(m1) * static_cast<double>(m2));
+    return w;
+}

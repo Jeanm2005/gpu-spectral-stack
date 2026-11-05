@@ -21,8 +21,15 @@ ROOT = Path(__file__).resolve().parent
 SOURCES = [
     "csrc/torch/ops.cpp",
     "csrc/ops/scale.cu",
+    "csrc/fft/fft2d.cu",
     "csrc/fft/naive.cu",
-    "csrc/fft/stockham.cu",
+    "csrc/fft/pruned.cu",
+    "csrc/fft/real.cu",
+    "csrc/fft/stockham_r2.cu",
+    "csrc/fft/stockham_r4.cu",
+    "csrc/fft/stockham_r8.cu",
+    "csrc/fft/stockham_r8_table.cu",
+    "csrc/fft/twiddles.cu",
 ]
 
 setup(

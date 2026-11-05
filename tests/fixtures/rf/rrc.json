@@ -1,0 +1,7 @@
+{
+  "generator": "gen_rf_fixtures.rrc_taps",
+  "num_taps": 65,
+  "samples_per_symbol": 8,
+  "roll_off": 0.35,
+  "span_symbols": 8
+}
