@@ -28,14 +28,23 @@ PyTorch's CUDA major version must match nvcc's (13 and 13); a minor difference o
 
 ```bash
 source .venv/bin/activate
+git switch -c phase-2-solver        # work happens on a branch; main is protected
 # edit
 tools/check_local.sh     # actionlint, ruff, C++ build, smoke tests, extension, every test
-git commit ...
-git push
+git commit ...           # one commit per roadmap task
+git push -u origin HEAD
+gh pr create --base main            # CI runs on the pull request
+gh pr merge --merge                 # once CI passes; a merge commit, never squash
 ```
 
 `check_local.sh` runs everything CI runs plus the GPU tests CI cannot run; a commit that has not
 passed it locally does not get pushed.
+
+`main` is protected by a repository ruleset: changes arrive only through pull requests, every CI
+job must pass before a merge, and force-pushes and deletion are blocked. Merge with a merge
+commit (or a rebase), not a squash: each task's commit then lands on `main` as its own commit,
+which is also what GitHub counts as a contribution (commits on other branches do not count until
+they reach the default branch).
 
 Rebuilding: `cmake --build build -j` after C++/CUDA changes for the command-line tools, and
 `pip install -e . --no-build-isolation` after any change under `csrc/` for the Python extension.
