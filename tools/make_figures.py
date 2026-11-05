@@ -26,19 +26,38 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Our most recent FFT implementation. Only it, cuFFT, and the scale kernel get a hue: categorical
+# Our fastest FFT implementation. Only it, cuFFT, and the scale kernel get a hue: categorical
 # slots 1-3 of the reference palette, the only three that stay distinguishable in every pair,
 # including under color-vision deficiency (checked with the palette validator in both modes).
-# Our earlier implementations are drawn in gray, with their own marker shape and a direct label.
-NEWEST = "stockham_r4"
+# Our other implementations are drawn in gray, with their own marker shape and a direct label.
+# (stockham_r8_table is newer than stockham_r8 but slower, so it stays gray.)
+NEWEST = "stockham_r8"
 
 # Every implementation, in drawing order; marker shapes are the second cue besides color.
-ORDER = ["naive", "stockham_r2", "stockham_r4", "cufft", "ours"]
-MARKERS = {"cufft": "o", "naive": "^", "stockham_r2": "v", "stockham_r4": "s", "ours": "D"}
+ORDER = [
+    "naive",
+    "stockham_r2",
+    "stockham_r4",
+    "stockham_r8_table",
+    "stockham_r8",
+    "cufft",
+    "ours",
+]
+MARKERS = {
+    "cufft": "o",
+    "naive": "^",
+    "stockham_r2": "v",
+    "stockham_r4": "s",
+    "stockham_r8": "P",
+    "stockham_r8_table": "X",
+    "ours": "D",
+}
 LABELS = {
     "cufft": "cuFFT",
     "naive": "naive radix-2",
     "stockham_r2": "Stockham radix-2",
+    "stockham_r8": "Stockham radix-8",
+    "stockham_r8_table": "Stockham radix-8, twiddle table",
     "stockham_r4": "Stockham radix-4",
     "ours": "scale kernel (bandwidth reference)",
 }

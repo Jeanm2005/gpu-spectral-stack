@@ -25,6 +25,8 @@ inline constexpr C2cImpl kC2cImpls[] = {
     {"naive", &c2c_naive, 1 << 30},
     {"stockham_r2", &c2c_stockham_r2, kStockhamMaxN},
     {"stockham_r4", &c2c_stockham_r4, kStockhamMaxN},
+    {"stockham_r8", &c2c_stockham_r8, kStockhamMaxN},
+    {"stockham_r8_table", &c2c_stockham_r8_table, kStockhamMaxN},
 };
 
 // The implementation called `name`, or nullptr if there is none.

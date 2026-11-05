@@ -9,4 +9,6 @@ namespace spectral::fft {
     constexpr int kStockhamMaxN = 4096;
     void c2c_stockham_r2(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);
     void c2c_stockham_r4(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);
+    void c2c_stockham_r8(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);
+    void c2c_stockham_r8_table(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);
 }
