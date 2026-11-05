@@ -16,12 +16,13 @@
 #include <torch/library.h>
 
 #include "common/types.hpp"
-#include "fft/fft.hpp"
+#include "fft/registry.hpp"
 #include "ops/scale.hpp"
 
 #include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -60,25 +61,15 @@ at::Tensor scale_cuda(const at::Tensor& x, double alpha)
     return y;
 }
 
-using C2cFn = void (*)(const cf32*, cf32*, int, int, spectral::fft::Direction, cudaStream_t);
-
-// Every FFT implementation, under the name tests and benchmarks select it by. Keep in sync with
-// FFT_IMPLS in python/spectral/ops.py.
-C2cFn c2c_impl(const std::string& name)
-{
-    if (name == "naive") {
-        return &spectral::fft::c2c_naive;
-    }
-    TORCH_CHECK(false, "unknown FFT implementation '", name, "' (available: naive)");
-    return nullptr;
-}
-
 // Batched complex FFT along the last dimension; every leading dimension is a batch dimension.
-at::Tensor fft_c2c_cuda(const at::Tensor& x, bool inverse, c10::string_view impl)
+at::Tensor fft_c2c_cuda(const at::Tensor& x, bool inverse, c10::string_view impl_name)
 {
     check_complex64_cuda(x, "x");
     TORCH_CHECK(x.dim() >= 1, "fft_c2c: x needs at least one dimension");
-    const C2cFn run = c2c_impl(std::string(impl.data(), impl.size()));
+    const std::string name(impl_name.data(), impl_name.size());
+    const spectral::fft::C2cImpl* impl = spectral::fft::find_c2c(name);
+    TORCH_CHECK(impl != nullptr, "unknown FFT implementation '", name,
+                "' (available: ", spectral::fft::c2c_names(), ")");
     if (x.numel() == 0) {
         return at::empty_like(x, at::MemoryFormat::Contiguous);
     }
@@ -86,17 +77,43 @@ at::Tensor fft_c2c_cuda(const at::Tensor& x, bool inverse, c10::string_view impl
     const int64_t n = x.size(-1);
     TORCH_CHECK((n & (n - 1)) == 0, "fft_c2c: the last dimension must be a power of two, got ",
                 n);
+    TORCH_CHECK(n <= impl->max_n, "fft_c2c: ", name, " supports sizes up to ", impl->max_n,
+                ", got ", n);
     const int64_t batch = x.numel() / n;
-    TORCH_CHECK(n <= INT_MAX && batch <= INT_MAX, "fft_c2c: too many elements");
+    TORCH_CHECK(batch <= INT_MAX, "fft_c2c: too many transforms");
 
     const c10::cuda::CUDAGuard device_guard(x.device());
     const at::Tensor xc = x.contiguous();
     at::Tensor y = at::empty_like(xc);
-    run(as_cf32(xc), as_cf32_mut(y), static_cast<int>(n), static_cast<int>(batch),
-        inverse ? spectral::fft::Direction::Inverse : spectral::fft::Direction::Forward,
-        at::cuda::getCurrentCUDAStream());
+    impl->run(as_cf32(xc), as_cf32_mut(y), static_cast<int>(n), static_cast<int>(batch),
+              inverse ? spectral::fft::Direction::Inverse : spectral::fft::Direction::Forward,
+              at::cuda::getCurrentCUDAStream());
     return y;
 }
+
+// spectral._C.fft_impls(): the names in fft/registry.hpp, in order, as a tuple of str.
+PyObject* py_fft_impls(PyObject*, PyObject*)
+{
+    const auto count = static_cast<Py_ssize_t>(std::size(spectral::fft::kC2cImpls));
+    PyObject* names = PyTuple_New(count);
+    if (names == nullptr) {
+        return nullptr;
+    }
+    for (Py_ssize_t i = 0; i < count; ++i) {
+        PyObject* name = PyUnicode_FromString(spectral::fft::kC2cImpls[i].name);
+        if (name == nullptr) {
+            Py_DECREF(names);
+            return nullptr;
+        }
+        PyTuple_SET_ITEM(names, i, name);  // the tuple takes over this reference
+    }
+    return names;
+}
+
+PyMethodDef module_methods[] = {
+    {"fft_impls", py_fft_impls, METH_NOARGS, "Names of the FFT implementations, in order."},
+    {nullptr, nullptr, 0, nullptr},  // end of the table
+};
 
 }  // namespace
 
@@ -112,17 +129,17 @@ TORCH_LIBRARY_IMPL(spectral, CUDA, m)
     m.impl("fft_c2c", &fft_c2c_cuda);
 }
 
-// Importing spectral._C from Python runs this. The module is empty: what matters is that
-// loading the shared library runs the TORCH_LIBRARY blocks above, which register the
-// operators under torch.ops.spectral.
+// Importing spectral._C from Python runs this. Loading the shared library runs the
+// TORCH_LIBRARY blocks above, which register the operators under torch.ops.spectral; the module
+// itself holds the plain Python functions in module_methods.
 PyMODINIT_FUNC PyInit__C(void)
 {
     static PyModuleDef module_def = {
         PyModuleDef_HEAD_INIT,
-        "_C",     // module name
-        nullptr,  // docstring
-        -1,       // per-interpreter state size
-        nullptr,  // methods
+        "_C",            // module name
+        nullptr,         // docstring
+        -1,              // per-interpreter state size
+        module_methods,  // methods
     };
     return PyModule_Create(&module_def);
 }

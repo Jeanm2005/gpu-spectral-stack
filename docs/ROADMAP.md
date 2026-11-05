@@ -27,8 +27,8 @@ Conventions
 ## Phase 1: FFT kernels (Nov 16 – early Jan)
 
 - [X] 1.1 Naive batched radix-2 Cooley–Tukey, complex-to-complex (C2C), forward and inverse
-- [ ] 1.2 Stockham radix-2 in shared memory, one block per transform (N ≤ 4096)
-- [ ] 1.3 Radix-4 and mixed radix 2/4/8; twiddle factors from a table vs computed on the fly
+- [X] 1.2 Stockham radix-2 in shared memory, one block per transform (N ≤ 4096)
+- [X] 1.3 Radix-4 and mixed radix 2/4/8; twiddle factors from a table vs computed on the fly
 - [ ] 1.4 (optional) Multi-block FFT for N beyond shared memory (four-step algorithm)
 - [ ] 1.5 Real-to-complex (R2C) and complex-to-real (C2R) through the N/2-point complex trick
 - [ ] 1.6 2D FFT: row transforms then column transforms (transpose vs strided), rfft2/irfft2

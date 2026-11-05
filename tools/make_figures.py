@@ -26,33 +26,55 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Colors follow the implementation, never its position in a list, so each keeps its color in
-# every figure. These are categorical slots 1-3 of the reference palette, the only three that
-# stay distinguishable in every pair, including under color-vision deficiency (checked with the
-# palette validator in both modes). Distinct marker shapes are the second cue. When more
-# implementations arrive, superseded ones become gray rather than taking a fourth hue.
+# Our most recent FFT implementation. Only it, cuFFT, and the scale kernel get a hue: categorical
+# slots 1-3 of the reference palette, the only three that stay distinguishable in every pair,
+# including under color-vision deficiency (checked with the palette validator in both modes).
+# Our earlier implementations are drawn in gray, with their own marker shape and a direct label.
+NEWEST = "stockham_r4"
+
+# Every implementation, in drawing order; marker shapes are the second cue besides color.
+ORDER = ["naive", "stockham_r2", "stockham_r4", "cufft", "ours"]
+MARKERS = {"cufft": "o", "naive": "^", "stockham_r2": "v", "stockham_r4": "s", "ours": "D"}
+LABELS = {
+    "cufft": "cuFFT",
+    "naive": "naive radix-2",
+    "stockham_r2": "Stockham radix-2",
+    "stockham_r4": "Stockham radix-4",
+    "ours": "scale kernel (bandwidth reference)",
+}
+
 THEMES = {
     "light": {
         "surface": "#fcfcfb",
         "text": "#0b0b0b",
         "muted": "#52514e",
         "grid": "#e6e5e1",
-        "series": {"cufft": "#2a78d6", "naive": "#eb6834", "ours": "#1baf7a"},
+        "superseded": "#a9a8a2",
+        "hues": {"cufft": "#2a78d6", "newest": "#eb6834", "ours": "#1baf7a"},
     },
     "dark": {
         "surface": "#1a1a19",
         "text": "#f0efec",
         "muted": "#c3c2b7",
         "grid": "#34332f",
-        "series": {"cufft": "#3987e5", "naive": "#d95926", "ours": "#199e70"},
+        "superseded": "#6b6a64",
+        "hues": {"cufft": "#3987e5", "newest": "#d95926", "ours": "#199e70"},
     },
 }
-MARKERS = {"cufft": "o", "naive": "^", "ours": "D"}
-LABELS = {
-    "cufft": "cuFFT",
-    "naive": "naive radix-2 (ours)",
-    "ours": "scale kernel (bandwidth reference)",
-}
+
+
+def color_for(impl: str, theme: dict) -> str:
+    if impl == NEWEST:
+        return theme["hues"]["newest"]
+    return theme["hues"].get(impl, theme["superseded"])
+
+
+def is_highlighted(impl: str) -> bool:
+    return impl in (NEWEST, "cufft", "ours")
+
+
+def label_for(impl: str) -> str:
+    return LABELS[impl] + (" (ours, newest)" if impl == NEWEST else "")
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -71,13 +93,13 @@ def load_rows(path: Path) -> list[dict]:
     ]
 
 
-def present_impls(rows: list[dict], theme: dict) -> list[str]:
-    """The implementations in `rows`, in the fixed color order."""
+def present_impls(rows: list[dict]) -> list[str]:
+    """The implementations in `rows`, in drawing order (gray ones first, under the others)."""
     found = {r["impl"] for r in rows}
-    unknown = found - theme["series"].keys()
+    unknown = found - set(ORDER)
     if unknown:
-        raise ValueError(f"add a color for {sorted(unknown)} to THEMES in make_figures.py")
-    return [impl for impl in theme["series"] if impl in found]
+        raise ValueError(f"add {sorted(unknown)} to ORDER, MARKERS, and LABELS in make_figures.py")
+    return [impl for impl in ORDER if impl in found]
 
 
 def styled_axes(theme: dict):
@@ -96,9 +118,9 @@ def styled_axes(theme: dict):
     return fig, ax
 
 
-def finish(fig, ax, theme: dict, title: str, path: Path, legend_loc: str) -> None:
+def finish(fig, ax, theme: dict, title: str, path: Path, **legend) -> None:
     ax.set_title(title, color=theme["text"], loc="left", fontsize=11)
-    ax.legend(frameon=False, labelcolor=theme["text"], loc=legend_loc)
+    ax.legend(frameon=False, labelcolor=theme["text"], fontsize=8, **legend)
     fig.savefig(path, facecolor=theme["surface"], bbox_inches="tight")
     plt.close(fig)
 
@@ -116,12 +138,13 @@ def roofline(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
     fig, ax = styled_axes(theme)
     ax.plot(xs, np.minimum(fp32, xs * bw), color=theme["muted"], linewidth=2, zorder=2)
     ax.axvline(ridge, color=theme["muted"], linewidth=1, linestyle=":", zorder=1)
-    ax.text(
-        lo * 1.3,
-        lo * 1.3 * bw * 2,
-        f"memory bandwidth {bw:,.0f} GB/s",
+    ax.text(  # in the empty region under the sloped line, right of the FFT points
+        ridge / 3,
+        ridge / 3 * bw / 12,
+        f"memory bandwidth\n{bw:,.0f} GB/s",
         color=theme["muted"],
         fontsize=9,
+        ha="center",
     )
     ax.text(
         hi / 1.2,
@@ -139,18 +162,18 @@ def roofline(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
         fontsize=9,
     )
 
-    for impl in present_impls(rows, theme):
+    for impl in present_impls(rows):
         pts = [r for r in rows if r["impl"] == impl]
         ax.scatter(
             [r["gflops"] / r["gbps"] for r in pts],
             [r["gflops"] for r in pts],
-            s=56,
+            s=56 if is_highlighted(impl) else 40,
             marker=MARKERS[impl],
-            color=theme["series"][impl],
+            color=color_for(impl, theme),
             edgecolors=theme["surface"],
             linewidths=1.5,
-            label=LABELS[impl],
-            zorder=3,
+            label=label_for(impl),
+            zorder=4 if is_highlighted(impl) else 3,
         )
 
     # Selective direct labels: only the smallest and largest cuFFT sizes.
@@ -161,7 +184,7 @@ def roofline(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
         ax.annotate(
             f"N = {r['n']}",
             (r["gflops"] / r["gbps"], r["gflops"]),
-            xytext=(8, -14),
+            xytext=(8, 6),
             textcoords="offset points",
             color=theme["text"],
             fontsize=8,
@@ -173,7 +196,7 @@ def roofline(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
     ax.set_ylim(bottom, fp32 * 3)
     ax.set_xlabel("arithmetic intensity (flop/byte)")
     ax.set_ylabel("GFLOP/s")
-    finish(fig, ax, theme, f"Roofline, {peaks['device']}", path, "lower right")
+    finish(fig, ax, theme, f"Roofline, {peaks['device']}", path, loc="lower right")
 
 
 def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> None:
@@ -191,24 +214,37 @@ def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> Non
         fontsize=9,
         va="bottom",
     )
-    for impl in present_impls(ffts, theme):
+    for impl in present_impls(ffts):
         pts = sorted((r for r in ffts if r["impl"] == impl), key=lambda r: r["n"])
+        highlighted = is_highlighted(impl)
         ax.plot(
             [r["n"] for r in pts],
             [r["gbps"] for r in pts],
-            color=theme["series"][impl],
-            linewidth=2,
+            color=color_for(impl, theme),
+            linewidth=2 if highlighted else 1.5,
             marker=MARKERS[impl],
-            markersize=7,
+            markersize=7 if highlighted else 6,
             markeredgecolor=theme["surface"],
             markeredgewidth=1.5,
-            label=LABELS[impl],
-            zorder=3,
+            label=label_for(impl),
+            zorder=4 if highlighted else 3,
         )
+        if not highlighted:  # gray lines carry a direct label, so identity is never color alone
+            last = pts[-1]
+            ax.annotate(
+                LABELS[impl],
+                (last["n"], last["gbps"]),
+                xytext=(8, 0),
+                textcoords="offset points",
+                color=theme["muted"],
+                fontsize=8,
+                va="center",
+            )
 
     ax.set_xscale("log", base=2)
     ax.set_xticks(sizes, [str(n) for n in sizes])
     ax.minorticks_off()
+    ax.set_xlim(sizes[0] / 1.3, sizes[-1] * 4)  # room for the direct labels on the right
     ax.set_ylim(0, bw * 1.15)
     ax.set_xlabel("transform size N (points)")
     ax.set_ylabel("effective bandwidth (GB/s)")
@@ -218,7 +254,8 @@ def fft_bandwidth(rows: list[dict], peaks: dict, theme: dict, path: Path) -> Non
         theme,
         "Complex FFT effective bandwidth, 2^24 points per launch",
         path,
-        "upper right",
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),  # outside the axes: the lines fill the whole plot
     )
 
 

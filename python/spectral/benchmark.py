@@ -17,7 +17,7 @@ from pathlib import Path
 
 import torch
 
-CSV_COLUMNS = ["op", "impl", "n", "batch", "time_ms", "min_ms", "gflops", "gbps"]
+CSV_COLUMNS = ["op", "impl", "n", "batch", "time_ms", "min_ms", "max_ms", "gflops", "gbps"]
 
 Key = tuple[str, str, int, int]  # (op, impl, n, batch)
 
@@ -72,10 +72,10 @@ def format_csv(results: Iterable[Result], comments: Iterable[str]) -> str:
     lines = [f"# {c}" for c in comments]
     lines.append(",".join(CSV_COLUMNS))
     for r in results:
-        ms = r.timing.median_ms
+        t = r.timing
         lines.append(
-            f"{r.op},{r.impl},{r.n},{r.batch},{ms:.6f},{r.timing.min_ms:.6f},"
-            f"{r.flops / (ms * 1e6):.1f},{r.nbytes / (ms * 1e6):.1f}"
+            f"{r.op},{r.impl},{r.n},{r.batch},{t.median_ms:.6f},{t.min_ms:.6f},{t.max_ms:.6f},"
+            f"{r.flops / (t.median_ms * 1e6):.1f},{r.nbytes / (t.median_ms * 1e6):.1f}"
         )
     return "\n".join(lines) + "\n"
 
@@ -95,7 +95,7 @@ def compare(
 ) -> tuple[list[str], bool]:
     """A report line for each row, and whether any matched row is slower than
     old * (1 + threshold). Rows found in only one of the two are listed but never fail."""
-    lines = [f"{'op':<10} {'impl':<8} {'n':>7} {'batch':>9} {'old ms':>10} {'new ms':>10} ratio"]
+    lines = [f"{'op':<10} {'impl':<12} {'n':>7} {'batch':>9} {'old ms':>10} {'new ms':>10} ratio"]
     regressed = False
     for key in sorted(old.keys() & new.keys()):
         ratio = new[key] / old[key]
@@ -106,7 +106,7 @@ def compare(
             flag = "  faster"
         op, impl, n, batch = key
         lines.append(
-            f"{op:<10} {impl:<8} {n:>7} {batch:>9} {old[key]:>10.4f} {new[key]:>10.4f} "
+            f"{op:<10} {impl:<12} {n:>7} {batch:>9} {old[key]:>10.4f} {new[key]:>10.4f} "
             f"{ratio:5.2f}x{flag}"
         )
     lines += [f"only in old: {key}" for key in sorted(old.keys() - new.keys())]

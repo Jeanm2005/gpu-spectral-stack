@@ -19,6 +19,8 @@ pytestmark = pytest.mark.gpu  # every test here runs our kernels
 
 IMPLS = spectral.FFT_IMPLS
 SIZES = [1, *POW2_SIZES]
+# The single-block kernels hold one transform in shared memory, up to 4096 points.
+SIZE_LIMITED = [impl for impl in IMPLS if impl.startswith("stockham")]
 
 
 def run(x: np.ndarray, *, inverse: bool = False, impl: str) -> np.ndarray:
@@ -51,6 +53,14 @@ def test_inverse_undoes_forward(rng, impl, n):
     x = torch.from_numpy(random_complex(rng, (3, n))).cuda()
     back = spectral.fft_c2c(spectral.fft_c2c(x, impl=impl), inverse=True, impl=impl)
     assert_transform_close(back, x, n, tol=2 * fft_tolerance(n))  # two transforms' worth
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+@pytest.mark.parametrize("batch", [255, 257, 1000])
+def test_batches_that_do_not_fill_the_last_block(rng, impl, batch):
+    # Small sizes pack many transforms into one block; these batch counts leave a partial block.
+    x = random_complex(rng, (batch, 8))
+    assert_transform_close(run(x, impl=impl), ref.fft(x), 8)
 
 
 # --- Known answers ----------------------------------------------------------------------------
@@ -104,6 +114,13 @@ def test_empty_input_gives_empty_output(impl):
 def test_rejects_a_size_that_is_not_a_power_of_two(impl):
     x = torch.zeros(4, 12, dtype=torch.complex64, device="cuda")
     with pytest.raises(RuntimeError, match="power of two"):
+        spectral.fft_c2c(x, impl=impl)
+
+
+@pytest.mark.parametrize("impl", SIZE_LIMITED)
+def test_rejects_a_size_above_the_implementation_limit(impl):
+    x = torch.zeros(2, 8192, dtype=torch.complex64, device="cuda")
+    with pytest.raises(RuntimeError, match="sizes up to 4096"):
         spectral.fft_c2c(x, impl=impl)
 
 

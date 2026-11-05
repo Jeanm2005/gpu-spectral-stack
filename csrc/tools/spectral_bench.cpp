@@ -5,13 +5,16 @@
 // runs batch = total / n transforms, so every row processes the same number of points (2^24, or
 // 128 MiB of complex64, by default): enough to fill the GPU at every size, and the rows are
 // comparable with each other. Lines starting with '#' record the device and the settings.
+//
+// A row whose slowest round is more than 5 % slower than its fastest gets a warning on stderr:
+// on this laptop that almost always means the GPU clock is not locked (docs/DEVELOPMENT.md).
 
 #include "common/bench.hpp"
 #include "common/check.hpp"
 #include "common/device_buffer.hpp"
 #include "common/fft_plan.hpp"
 #include "common/types.hpp"
-#include "fft/fft.hpp"
+#include "fft/registry.hpp"
 #include "ops/scale.hpp"
 
 #include <algorithm>
@@ -28,10 +31,12 @@
 
 namespace {
 
+constexpr double kUnstableSpread = 0.05;  // max_ms / min_ms - 1 above this gets a warning
+
 const char* const kUsage =
     "usage: spectral_bench [options]\n"
     "  --op NAME       all (default), fft_c2c, or scale\n"
-    "  --impl NAME     all (default), cufft, naive, or ours (the scale kernel)\n"
+    "  --impl NAME     all (default), cufft, ours (the scale kernel), or one of our FFTs\n"
     "  --sizes LIST    comma-separated transform sizes (default: 2,4,...,4096)\n"
     "  --total N       points per row; batch = total / n (default: 16777216)\n"
     "  --warmup N      untimed launches (default: 3)\n"
@@ -47,7 +52,7 @@ struct Options {
     TimingConfig timing;
     std::string out;
 
-    bool wants(const char* name) const { return impl == "all" || impl == name; }
+    bool wants(const std::string& name) const { return impl == "all" || impl == name; }
 };
 
 [[noreturn]] void usage_error(const std::string& message)
@@ -92,6 +97,7 @@ Options parse_options(int argc, char** argv)
         const std::string flag = argv[i];
         if (flag == "--help" || flag == "-h") {
             std::fputs(kUsage, stdout);
+            std::printf("our FFTs: %s\n", spectral::fft::c2c_names().c_str());
             std::exit(0);
         }
         if (i + 1 >= argc) {
@@ -121,9 +127,10 @@ Options parse_options(int argc, char** argv)
     if (options.op != "all" && options.op != "fft_c2c" && options.op != "scale") {
         usage_error("unknown --op " + options.op);
     }
-    if (options.impl != "all" && options.impl != "cufft" && options.impl != "naive"
-        && options.impl != "ours") {
-        usage_error("unknown --impl " + options.impl);
+    if (options.impl != "all" && options.impl != "cufft" && options.impl != "ours"
+        && spectral::fft::find_c2c(options.impl) == nullptr) {
+        usage_error("unknown --impl " + options.impl + " (our FFTs: "
+                    + spectral::fft::c2c_names() + ")");
     }
     if (options.sizes.empty()) {
         for (long long n = 2; n <= 4096; n *= 2) {
@@ -151,8 +158,8 @@ void write_header(std::ostream& os, const Options& options)
        << "# CUDA runtime " << runtime << ", driver " << driver << ", cuFFT " << cufft << '\n'
        << "# timing: " << options.timing.warmup << " warm-up launches, then the median over "
        << options.timing.rounds << " rounds of " << options.timing.iters
-       << " launches; time_ms is per launch\n"
-       << "op,impl,n,batch,time_ms,min_ms,gflops,gbps\n";
+       << " launches; times are per launch\n"
+       << "op,impl,n,batch,time_ms,min_ms,max_ms,gflops,gbps\n";
 }
 
 struct Row {
@@ -164,17 +171,26 @@ struct Row {
     Work work;
 };
 
+int unstable_rows = 0;
+
 void write_row(std::ostream& os, const Row& r, bool progress)
 {
     const double gflops = gflops_per_s(r.work, r.timing.median_ms);
     const double gbps = gbytes_per_s(r.work, r.timing.median_ms);
     char line[256];
-    std::snprintf(line, sizeof line, "%s,%s,%lld,%lld,%.6f,%.6f,%.1f,%.1f\n", r.op, r.impl, r.n,
-                  r.batch, r.timing.median_ms, r.timing.min_ms, gflops, gbps);
+    std::snprintf(line, sizeof line, "%s,%s,%lld,%lld,%.6f,%.6f,%.6f,%.1f,%.1f\n", r.op, r.impl,
+                  r.n, r.batch, r.timing.median_ms, r.timing.min_ms, r.timing.max_ms, gflops,
+                  gbps);
     os << line << std::flush;
     if (progress) {
-        std::fprintf(stderr, "%-8s %-6s n=%-6lld batch=%-9lld %9.4f ms %8.1f GB/s\n", r.op,
+        std::fprintf(stderr, "%-8s %-12s n=%-6lld batch=%-9lld %9.4f ms %8.1f GB/s\n", r.op,
                      r.impl, r.n, r.batch, r.timing.median_ms, gbps);
+    }
+    const double spread = r.timing.max_ms / r.timing.min_ms - 1.0;
+    if (spread > kUnstableSpread) {
+        ++unstable_rows;
+        std::fprintf(stderr, "warning: %s %s n=%lld: rounds differ by %.0f %%\n", r.op, r.impl,
+                     r.n, 100.0 * spread);
     }
 }
 
@@ -211,14 +227,17 @@ void bench_fft_c2c(const Options& options, const cf32* x, cf32* y, cudaStream_t 
             write_row(os, {"fft_c2c", "cufft", n, batch, t, work}, progress);
         }
 
-        if (options.wants("naive")) {
+        for (const spectral::fft::C2cImpl& impl : spectral::fft::kC2cImpls) {
+            if (!options.wants(impl.name) || n > impl.max_n) {
+                continue;
+            }
             const Timing t = time_kernel(
                 [&](cudaStream_t s) {
-                    spectral::fft::c2c_naive(x, y, static_cast<int>(n), static_cast<int>(batch),
-                                             spectral::fft::Direction::Forward, s);
+                    impl.run(x, y, static_cast<int>(n), static_cast<int>(batch),
+                             spectral::fft::Direction::Forward, s);
                 },
                 stream, options.timing);
-            write_row(os, {"fft_c2c", "naive", n, batch, t, work}, progress);
+            write_row(os, {"fft_c2c", impl.name, n, batch, t, work}, progress);
         }
     }
 }
@@ -277,6 +296,12 @@ int main(int argc, char** argv)
         }
 
         CUDA_CHECK(cudaStreamDestroy(stream));
+        if (unstable_rows > 0) {
+            std::fprintf(stderr,
+                         "warning: %d unstable row(s); lock the GPU clock before trusting these "
+                         "numbers (docs/DEVELOPMENT.md, Benchmarks)\n",
+                         unstable_rows);
+        }
         return 0;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

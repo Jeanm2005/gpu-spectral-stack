@@ -2,9 +2,11 @@
 
 import torch
 
-# Every FFT implementation the extension provides, in the order they were written. Keep in sync
-# with c2c_impl() in csrc/torch/ops.cpp.
-FFT_IMPLS = ("naive",)
+from . import _C
+
+# Every FFT implementation the extension provides, in the order they were written. Read from the
+# C++ table (csrc/fft/registry.hpp), so adding an implementation there adds it to every test.
+FFT_IMPLS: tuple[str, ...] = _C.fft_impls()
 
 
 def scale(x: torch.Tensor, alpha: float) -> torch.Tensor:
@@ -22,5 +24,6 @@ def fft_c2c(x: torch.Tensor, *, inverse: bool = False, impl: str = "naive") -> t
     x must be complex64 on a CUDA device with a power-of-two last dimension; every leading
     dimension is a batch dimension. The forward transform is unnormalized and the inverse
     divides by n, as torch.fft.fft and torch.fft.ifft do. Returns a new contiguous tensor.
+    `impl` is one of FFT_IMPLS; some implementations have a largest supported size.
     """
     return torch.ops.spectral.fft_c2c.default(x, inverse, impl)

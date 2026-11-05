@@ -22,6 +22,7 @@ SOURCES = [
     "csrc/torch/ops.cpp",
     "csrc/ops/scale.cu",
     "csrc/fft/naive.cu",
+    "csrc/fft/stockham.cu",
 ]
 
 setup(

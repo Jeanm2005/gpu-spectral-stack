@@ -38,4 +38,7 @@ fi
 profile fft_c2c cufft 256
 profile fft_c2c cufft 4096
 profile fft_c2c naive 4096
+profile fft_c2c stockham_r2 4096
+profile fft_c2c stockham_r4 4096
+profile fft_c2c stockham_r4 256
 profile scale ours 16777216
