@@ -27,3 +27,23 @@ def fft_c2c(x: torch.Tensor, *, inverse: bool = False, impl: str = "naive") -> t
     `impl` is one of FFT_IMPLS; some implementations have a largest supported size.
     """
     return torch.ops.spectral.fft_c2c.default(x, inverse, impl)
+
+
+def rfft(x: torch.Tensor, *, impl: str = "naive") -> torch.Tensor:
+    """Batched real-to-complex FFT along the last dimension, like torch.fft.rfft.
+
+    x must be float32 on a CUDA device with a power-of-two last dimension n >= 2. Returns a new
+    complex64 tensor whose last dimension holds the n // 2 + 1 non-negative frequencies.
+    Computed as one n/2-point complex transform (see csrc/fft/real.cuh).
+    """
+    return torch.ops.spectral.fft_r2c.default(x, impl)
+
+
+def irfft(x: torch.Tensor, n: int, *, impl: str = "naive") -> torch.Tensor:
+    """Inverse of rfft, divided by n, like torch.fft.irfft(x, n).
+
+    x must be complex64 on a CUDA device with n // 2 + 1 values in its last dimension, n a power
+    of two >= 2. The imaginary parts of the zero and n/2 frequencies are ignored, as in torch.
+    Returns a new float32 tensor with n values in its last dimension.
+    """
+    return torch.ops.spectral.fft_c2r.default(x, n, impl)

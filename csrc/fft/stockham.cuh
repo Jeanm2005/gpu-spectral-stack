@@ -24,6 +24,7 @@
 // source, so the variants compile in parallel.
 
 #include "fft/fft.hpp"
+#include "fft/real.cuh"
 
 #include "common/check.hpp"
 
@@ -235,6 +236,63 @@ struct C2cIo {
     }
 };
 
+// Real input (Task 1.5): `batch` rows of 2N reals, read as N complex values each (see real.cuh),
+// so the load is C2cIo's. After the forward N-point transform, the store combines Z[k] and
+// Z[N - k] from shared memory into the N + 1 outputs of the 2N-point real transform; row t of y
+// starts at t * (N + 1). The writes stay coalesced: consecutive threads, consecutive outputs.
+struct R2cIo {
+    const cf32* x;
+    cf32* y;
+
+    template <int N, int T>
+    __device__ __forceinline__ void load(cf32* smem, int first, int count) const
+    {
+        C2cIo{x, nullptr, 1.0f}.load<N, T>(smem, first, count);
+    }
+
+    template <int N, int T>
+    __device__ __forceinline__ void store(const cf32* smem, int first, int count) const
+    {
+        constexpr int kRow = N + 1;
+        const std::size_t base = static_cast<std::size_t>(first) * kRow;
+        for (int e = threadIdx.x; e < count * kRow; e += kThreads) {
+            const int t = e / kRow;  // a division by a constant: a multiply and a shift
+            const int k = e - t * kRow;
+            const cf32* z = smem + t * N;
+            const float k_over_n = static_cast<float>(k) / static_cast<float>(N);  // exact
+            y[base + e] = real::r2c_combine(z[k & (N - 1)], z[(N - k) & (N - 1)], k_over_n);
+        }
+    }
+};
+
+// Real output (Task 1.5): rows of N + 1 complex inputs X[0 .. N]; the load prepares Z[k] from
+// X[k] and X[N - k] (both reads are contiguous runs, one ascending, one descending), the kernel
+// runs the inverse N-point transform, and the store writes z, scaled by 1/N, as 2N reals.
+struct C2rIo {
+    const cf32* x;
+    cf32* y;
+    float scale;  // 1/N
+
+    template <int N, int T>
+    __device__ __forceinline__ void load(cf32* smem, int first, int count) const
+    {
+        constexpr int kRow = N + 1;
+        for (int e = threadIdx.x; e < count * N; e += kThreads) {
+            const int t = e / N;
+            const int k = e & (N - 1);
+            const cf32* row = x + static_cast<std::size_t>(first + t) * kRow;
+            const float k_over_n = static_cast<float>(k) / static_cast<float>(N);  // exact
+            smem[e] = real::c2r_prepare(row[k], row[N - k], k, k_over_n);
+        }
+    }
+
+    template <int N, int T>
+    __device__ __forceinline__ void store(const cf32* smem, int first, int count) const
+    {
+        C2cIo{nullptr, y, scale}.store<N, T>(smem, first, count);
+    }
+};
+
 // --- The kernel and its dispatch ---------------------------------------------------------------
 
 // The last block may hold fewer than kTransformsPerBlock transforms; its threads still take part
@@ -340,6 +398,36 @@ void c2c(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStre
     const float sign = inverse ? 1.0f : -1.0f;
     const float scale = inverse ? 1.0f / static_cast<float>(n) : 1.0f;  // exact: n = 2^k
     dispatch<R, Table>(n, C2cIo{x, y, scale}, batch, sign, stream);
+}
+
+// Real transforms of n = 2m points run one m-point kernel each, so n goes up to 2 * 4096.
+constexpr int kRealMaxN = 2 * kStockhamMaxN;
+
+template <int R, bool Table>
+void r2c(const float* x, cf32* y, int n, int batch, cudaStream_t stream)
+{
+    real::check_arguments(x, y, n, batch, kRealMaxN, "stockham r2c");
+    const int m = n / 2;
+    const auto* z = reinterpret_cast<const cf32*>(x);  // n reals are m complex values
+    if (m == 1) {  // a 1-point DFT is the identity: only the combine step is left
+        real::r2c_postprocess(z, y, 1, batch, stream);
+        return;
+    }
+    dispatch<R, Table>(m, R2cIo{z, y}, batch, -1.0f, stream);
+}
+
+template <int R, bool Table>
+void c2r(const cf32* x, float* y, int n, int batch, cudaStream_t stream)
+{
+    real::check_arguments(y, x, n, batch, kRealMaxN, "stockham c2r");
+    const int m = n / 2;
+    auto* z = reinterpret_cast<cf32*>(y);
+    if (m == 1) {
+        real::c2r_preprocess(x, z, 1, batch, stream);
+        return;
+    }
+    const float scale = 1.0f / static_cast<float>(m);  // exact: m = 2^k
+    dispatch<R, Table>(m, C2rIo{x, z, scale}, batch, 1.0f, stream);
 }
 
 }  // namespace spectral::fft::stockham

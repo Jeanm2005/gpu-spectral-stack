@@ -98,3 +98,13 @@ Work fft_c2c_work(long long n, long long batch)
     w.bytes = 2.0 * 8.0 * points;  // one complex64 (8 bytes) read and one written per point
     return w;
 }
+
+Work fft_real_work(long long n, long long batch)
+{
+    const double rows = static_cast<double>(batch);
+    const double real_n = static_cast<double>(n);
+    Work w;
+    w.flops = 2.5 * real_n * rows * std::log2(real_n);
+    w.bytes = rows * (4.0 * real_n + 8.0 * (real_n / 2.0 + 1.0));  // float32 + complex64 sides
+    return w;
+}

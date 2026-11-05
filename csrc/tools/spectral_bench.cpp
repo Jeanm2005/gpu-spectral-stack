@@ -35,7 +35,7 @@ constexpr double kUnstableSpread = 0.05;  // max_ms / min_ms - 1 above this gets
 
 const char* const kUsage =
     "usage: spectral_bench [options]\n"
-    "  --op NAME       all (default), fft_c2c, or scale\n"
+    "  --op NAME       all (default), fft_c2c, fft_r2c, fft_c2r, or scale\n"
     "  --impl NAME     all (default), cufft, ours (the scale kernel), or one of our FFTs\n"
     "  --sizes LIST    comma-separated transform sizes (default: 2,4,...,4096)\n"
     "  --total N       points per row; batch = total / n (default: 16777216)\n"
@@ -97,7 +97,7 @@ Options parse_options(int argc, char** argv)
         const std::string flag = argv[i];
         if (flag == "--help" || flag == "-h") {
             std::fputs(kUsage, stdout);
-            std::printf("our FFTs: %s\n", spectral::fft::c2c_names().c_str());
+            std::printf("our FFTs: %s\n", spectral::fft::impl_names().c_str());
             std::exit(0);
         }
         if (i + 1 >= argc) {
@@ -124,13 +124,14 @@ Options parse_options(int argc, char** argv)
             usage_error("unknown option " + flag);
         }
     }
-    if (options.op != "all" && options.op != "fft_c2c" && options.op != "scale") {
+    if (options.op != "all" && options.op != "fft_c2c" && options.op != "fft_r2c"
+        && options.op != "fft_c2r" && options.op != "scale") {
         usage_error("unknown --op " + options.op);
     }
     if (options.impl != "all" && options.impl != "cufft" && options.impl != "ours"
-        && spectral::fft::find_c2c(options.impl) == nullptr) {
+        && spectral::fft::find_impl(options.impl) == nullptr) {
         usage_error("unknown --impl " + options.impl + " (our FFTs: "
-                    + spectral::fft::c2c_names() + ")");
+                    + spectral::fft::impl_names() + ")");
     }
     if (options.sizes.empty()) {
         for (long long n = 2; n <= 4096; n *= 2) {
@@ -227,17 +228,72 @@ void bench_fft_c2c(const Options& options, const cf32* x, cf32* y, cudaStream_t 
             write_row(os, {"fft_c2c", "cufft", n, batch, t, work}, progress);
         }
 
-        for (const spectral::fft::C2cImpl& impl : spectral::fft::kC2cImpls) {
+        for (const spectral::fft::FftImpl& impl : spectral::fft::kFftImpls) {
             if (!options.wants(impl.name) || n > impl.max_n) {
                 continue;
             }
             const Timing t = time_kernel(
                 [&](cudaStream_t s) {
-                    impl.run(x, y, static_cast<int>(n), static_cast<int>(batch),
+                    impl.c2c(x, y, static_cast<int>(n), static_cast<int>(batch),
                              spectral::fft::Direction::Forward, s);
                 },
                 stream, options.timing);
             write_row(os, {"fft_c2c", impl.name, n, batch, t, work}, progress);
+        }
+    }
+}
+
+// Real transforms of n points, batch = total / n: forward (fft_r2c) reads n floats and writes
+// n/2 + 1 complex values per transform; fft_c2r the reverse. The buffers hold `total` complex
+// values, more than either side needs. The C2R input is random complex data: only the timing
+// matters here, and cuFFT may overwrite a C2R input, which it would also do to real data.
+void bench_fft_real(const Options& options, const char* op, const cf32* x, cf32* y, cf32* work,
+                    cudaStream_t stream, std::ostream& os, bool progress)
+{
+    const bool forward = std::string(op) == "fft_r2c";
+    for (const long long n : options.sizes) {
+        if (n < 2) {
+            continue;
+        }
+        const long long batch = std::max(1LL, options.total / n);
+        const Work w = fft_real_work(n, batch);
+        const auto* x_real = reinterpret_cast<const float*>(x);
+        auto* y_real = reinterpret_cast<float*>(y);
+
+        if (options.wants("cufft")) {
+            FftPlan plan(static_cast<int>(n), static_cast<int>(batch),
+                         forward ? CUFFT_R2C : CUFFT_C2R);
+            CUFFT_CHECK(cufftSetStream(plan.get(), stream));
+            const Timing t = time_kernel(
+                [&](cudaStream_t) {
+                    if (forward) {
+                        CUFFT_CHECK(cufftExecR2C(plan.get(), const_cast<float*>(x_real),
+                                                 reinterpret_cast<cufftComplex*>(y)));
+                    } else {
+                        CUFFT_CHECK(cufftExecC2R(
+                            plan.get(), const_cast<cufftComplex*>(
+                                            reinterpret_cast<const cufftComplex*>(x)),
+                            y_real));
+                    }
+                },
+                stream, options.timing);
+            write_row(os, {op, "cufft", n, batch, t, w}, progress);
+        }
+
+        for (const spectral::fft::FftImpl& impl : spectral::fft::kFftImpls) {
+            if (!options.wants(impl.name) || n > impl.max_real_n) {
+                continue;
+            }
+            const Timing t = time_kernel(
+                [&](cudaStream_t s) {
+                    if (forward) {
+                        impl.r2c(x_real, y, static_cast<int>(n), static_cast<int>(batch), work, s);
+                    } else {
+                        impl.c2r(x, y_real, static_cast<int>(n), static_cast<int>(batch), work, s);
+                    }
+                },
+                stream, options.timing);
+            write_row(os, {op, impl.name, n, batch, t, w}, progress);
         }
     }
 }
@@ -269,6 +325,7 @@ int main(int argc, char** argv)
         const auto count = static_cast<std::size_t>(capacity);
         DeviceBuffer<cf32> x(count);
         DeviceBuffer<cf32> y(count);
+        DeviceBuffer<cf32> work(count / 2 + 1);  // real transforms without a fused kernel
         {
             const std::vector<cf32> host = random_input(count);
             x.upload(host.data(), count);
@@ -290,6 +347,11 @@ int main(int argc, char** argv)
         write_header(os, options);
         if (options.op == "all" || options.op == "fft_c2c") {
             bench_fft_c2c(options, x.get(), y.get(), stream, os, progress);
+        }
+        for (const char* op : {"fft_r2c", "fft_c2r"}) {
+            if (options.op == "all" || options.op == op) {
+                bench_fft_real(options, op, x.get(), y.get(), work.get(), stream, os, progress);
+            }
         }
         if ((options.op == "all" || options.op == "scale") && options.wants("ours")) {
             bench_scale(options, x.get(), y.get(), stream, os, progress);

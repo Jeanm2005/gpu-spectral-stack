@@ -49,3 +49,8 @@ double gbytes_per_s(const Work& work, double ms);
 // Cooley-Tukey, used by FFTW's and cuFFT's own benchmarks), and one complex64 read plus one
 // write per point. spectral.benchmark.fft_c2c_work in Python uses the same convention.
 Work fft_c2c_work(long long n, long long batch);
+
+// Real transforms of n points (either direction) by the same convention: half the flops of a
+// complex transform, 2.5 N log2 N, and n float32 values on the real side plus n/2 + 1 complex64
+// values on the complex side. spectral.benchmark.fft_real_work matches it.
+Work fft_real_work(long long n, long long batch);

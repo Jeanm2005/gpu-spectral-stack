@@ -10,15 +10,17 @@
 // A cuFFT plan, destroyed when it goes out of scope.
 class FftPlan {
 public:
-    // `batch` one-dimensional complex-to-complex transforms of `nfft` points each, stored
-    // back to back in one buffer.
-    FftPlan(int nfft, int batch)
+    // `batch` one-dimensional transforms of `nfft` points each, stored back to back in one
+    // buffer: complex-to-complex by default, or CUFFT_R2C / CUFFT_C2R, whose complex side holds
+    // nfft/2 + 1 values per transform.
+    FftPlan(int nfft, int batch, cufftType type = CUFFT_C2C)
     {
         // The two nullptr "embed" arguments select the simple layout: frame f occupies
-        // elements [f * nfft, (f + 1) * nfft). The stride and distance values are then
-        // ignored by cuFFT, but are filled in with what that layout means.
-        CUFFT_CHECK(cufftPlanMany(&plan_, 1, &nfft, nullptr, 1, nfft, nullptr, 1, nfft,
-                                  CUFFT_C2C, batch));
+        // elements [f * len, (f + 1) * len), where len is nfft on the real or complex-to-complex
+        // side and nfft/2 + 1 on the complex side of a real transform. The stride and distance
+        // values are then ignored by cuFFT.
+        CUFFT_CHECK(cufftPlanMany(&plan_, 1, &nfft, nullptr, 1, nfft, nullptr, 1, nfft, type,
+                                  batch));
     }
     ~FftPlan()
     {

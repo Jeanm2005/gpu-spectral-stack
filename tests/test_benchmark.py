@@ -5,13 +5,19 @@ import pytest
 import torch
 
 import spectral
-from spectral.benchmark import compare, fft_c2c_work, read_results, time_cuda
+from spectral.benchmark import compare, fft_c2c_work, fft_real_work, read_results, time_cuda
 
 
 def test_fft_work_follows_the_5_n_log2_n_convention():
     flops, nbytes = fft_c2c_work(1024, 3)
     assert flops == 5 * 1024 * 10 * 3
     assert nbytes == 16 * 1024 * 3
+
+
+def test_real_fft_work_is_half_the_flops_and_counts_both_sides():
+    flops, nbytes = fft_real_work(1024, 3)
+    assert flops == fft_c2c_work(1024, 3)[0] / 2
+    assert nbytes == 3 * (4 * 1024 + 8 * 513)  # float32 in, n/2 + 1 complex64 out
 
 
 def test_compare_flags_only_changes_beyond_the_threshold():
