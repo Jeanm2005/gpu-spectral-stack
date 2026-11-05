@@ -28,6 +28,7 @@
 
 #include "common/check.hpp"
 
+#include <climits>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -59,8 +60,7 @@ struct Shape {
     static_assert(N >= R && (N & (N - 1)) == 0, "N must be a power of two, at least R");
     static constexpr int kButterflies = N / R;  // per radix-R stage
     static constexpr int kLanes = kButterflies < kThreads ? kButterflies : kThreads;
-    static constexpr int kTransformsPerBlock = kThreads / kLanes;
-    static constexpr int kSharedElements = kTransformsPerBlock * N;  // at most 4096: 32 KiB
+    static constexpr int kTransformsPerBlock = kThreads / kLanes;  // at most 4096 / N
     static constexpr int kStages = ilog2(N) / ilog2(R);              // radix-R stages
     static constexpr int kFinalRadix = 1 << (ilog2(N) - kStages * ilog2(R));
 };
@@ -293,7 +293,71 @@ struct C2rIo {
     }
 };
 
+// Columns of a row-major array (Task 1.6): `slabs` arrays of N rows by `cols` columns, stored
+// back to back, each column one transform; transform t is column t % cols of slab t / cols. A
+// block's T transforms are T neighbouring columns, and consecutive threads take consecutive
+// columns of one row, so each warp reads and writes runs of T adjacent elements: coalesced in
+// runs of T * 8 bytes, which is short when N is large and T small (T = 1 at N = 4096). Measuring
+// that cost against transposing is the point of having both.
+//
+// The load writes column j's element i to smem[j * (N + kPad) + i]. Without padding, the threads
+// of a warp (consecutive j, one i) would write addresses N apart, all in one bank; one extra
+// element per transform spreads them over the banks.
+//
+// x and y may be the same array: every block reads all of its columns before writing any, and no
+// two blocks share a column.
+struct StridedIo {
+    static constexpr int kPad = 1;
+    const cf32* x;
+    cf32* y;
+    int cols;
+    float scale;
+
+    template <int N, int T>
+    __device__ __forceinline__ std::size_t offset(int first, int j, int i) const
+    {
+        const int t = first + j;
+        const int slab = t / cols;
+        const int col = t - slab * cols;
+        return (static_cast<std::size_t>(slab) * N + i) * static_cast<std::size_t>(cols) + col;
+    }
+
+    template <int N, int T>
+    __device__ __forceinline__ void load(cf32* smem, int first, int count) const
+    {
+        for (int e = threadIdx.x; e < T * N; e += kThreads) {
+            const int i = e / T;  // T is a power of two: a shift
+            const int j = e % T;
+            if (j < count) {
+                smem[j * (N + kPad) + i] = x[offset<N, T>(first, j, i)];
+            }
+        }
+    }
+
+    template <int N, int T>
+    __device__ __forceinline__ void store(const cf32* smem, int first, int count) const
+    {
+        for (int e = threadIdx.x; e < T * N; e += kThreads) {
+            const int i = e / T;
+            const int j = e % T;
+            if (j < count) {
+                y[offset<N, T>(first, j, i)] = scaled(smem[j * (N + kPad) + i], scale);
+            }
+        }
+    }
+};
+
 // --- The kernel and its dispatch ---------------------------------------------------------------
+
+// Shared-memory padding after each transform: a policy may ask for some (StridedIo does).
+template <class Io, class = void>
+struct PadOf {
+    static constexpr int value = 0;
+};
+template <class Io>
+struct PadOf<Io, decltype(void(Io::kPad))> {
+    static constexpr int value = Io::kPad;
+};
 
 // The last block may hold fewer than kTransformsPerBlock transforms; its threads still take part
 // in every barrier, the policy just loads and stores fewer elements.
@@ -302,14 +366,15 @@ __global__ void __launch_bounds__(kThreads)
     stockham_kernel(Io io, const cf32* __restrict__ table, int batch, float sign)
 {
     using S = Shape<N, R>;
-    __shared__ cf32 smem[S::kSharedElements];
+    constexpr int kStride = N + PadOf<Io>::value;  // shared-memory distance between transforms
+    __shared__ cf32 smem[S::kTransformsPerBlock * kStride];
 
     const int first = blockIdx.x * S::kTransformsPerBlock;
     const int count = min_int(S::kTransformsPerBlock, batch - first);
     io.template load<N, S::kTransformsPerBlock>(smem, first, count);
     __syncthreads();
 
-    cf32* s = smem + (threadIdx.x / S::kLanes) * N;
+    cf32* s = smem + (threadIdx.x / S::kLanes) * kStride;
     const int lane = threadIdx.x % S::kLanes;
     int ns = 1;
 #pragma unroll
@@ -333,15 +398,6 @@ void run(const Io& io, int batch, float sign, cudaStream_t stream)
     const cf32* table = Table ? twiddle_table() : nullptr;
     stockham_kernel<N, R, Table, Io><<<blocks, kThreads, 0, stream>>>(io, table, batch, sign);
     CUDA_CHECK(cudaGetLastError());
-}
-
-// The number of transforms per block for size n: callers that lay out a block's transforms
-// themselves (strided columns) need it on the host.
-template <int R>
-int transforms_per_block(int n)
-{
-    const int lanes = min_int(n / min_int(n, R), kThreads);
-    return kThreads / lanes;
 }
 
 // One case per size, 2 to kStockhamMaxN. Transforms shorter than the radix use their own length
@@ -398,6 +454,32 @@ void c2c(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStre
     const float sign = inverse ? 1.0f : -1.0f;
     const float scale = inverse ? 1.0f / static_cast<float>(n) : 1.0f;  // exact: n = 2^k
     dispatch<R, Table>(n, C2cIo{x, y, scale}, batch, sign, stream);
+}
+
+template <int R, bool Table>
+void columns(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction,
+             cudaStream_t stream)
+{
+    if (n < 1 || n > kStockhamMaxN || (n & (n - 1)) != 0) {
+        throw std::invalid_argument("stockham columns: n must be a power of two from 1 to "
+                                    + std::to_string(kStockhamMaxN) + ", got "
+                                    + std::to_string(n));
+    }
+    if (cols < 1 || slabs < 1 || static_cast<long long>(cols) * slabs > INT_MAX) {
+        throw std::invalid_argument("stockham columns: need 1 <= cols * slabs <= INT_MAX");
+    }
+    const int batch = cols * slabs;
+    if (n == 1) {
+        if (x != y) {
+            const std::size_t bytes = static_cast<std::size_t>(batch) * sizeof(cf32);
+            CUDA_CHECK(cudaMemcpyAsync(y, x, bytes, cudaMemcpyDeviceToDevice, stream));
+        }
+        return;
+    }
+    const bool inverse = direction == Direction::Inverse;
+    const float sign = inverse ? 1.0f : -1.0f;
+    const float scale = inverse ? 1.0f / static_cast<float>(n) : 1.0f;
+    dispatch<R, Table>(n, StridedIo{x, y, cols, scale}, batch, sign, stream);
 }
 
 // Real transforms of n = 2m points run one m-point kernel each, so n goes up to 2 * 4096.

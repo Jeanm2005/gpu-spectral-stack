@@ -47,3 +47,37 @@ def irfft(x: torch.Tensor, n: int, *, impl: str = "naive") -> torch.Tensor:
     Returns a new float32 tensor with n values in its last dimension.
     """
     return torch.ops.spectral.fft_c2r.default(x, n, impl)
+
+
+# 2D transforms (Task 1.6). `columns` picks how the column transforms run: "strided" transforms
+# them in place with a kernel that reads columns directly (the Stockham implementations have
+# one), "transpose" transposes, runs row transforms, and transposes back (every implementation),
+# and "auto" takes "strided" when it exists.
+
+
+def fft2(
+    x: torch.Tensor, *, inverse: bool = False, impl: str = "naive", columns: str = "auto"
+) -> torch.Tensor:
+    """Batched 2D complex FFT over the last two dimensions, like torch.fft.fft2 (or ifft2).
+
+    x must be complex64 on a CUDA device; both of its last two dimensions powers of two.
+    """
+    return torch.ops.spectral.fft2_c2c.default(x, inverse, impl, columns)
+
+
+def rfft2(x: torch.Tensor, *, impl: str = "naive", columns: str = "auto") -> torch.Tensor:
+    """Batched 2D real-to-complex FFT over the last two dimensions, like torch.fft.rfft2.
+
+    x must be float32 on a CUDA device, (..., n1, n2) with powers of two and n2 >= 2. Returns
+    complex64 of shape (..., n1, n2 // 2 + 1).
+    """
+    return torch.ops.spectral.fft2_r2c.default(x, impl, columns)
+
+
+def irfft2(x: torch.Tensor, n2: int, *, impl: str = "naive", columns: str = "auto") -> torch.Tensor:
+    """Inverse of rfft2, like torch.fft.irfft2(x, s=(x.shape[-2], n2)): divides by n1 * n2.
+
+    x must be complex64 of shape (..., n1, n2 // 2 + 1) on a CUDA device. Returns float32 of
+    shape (..., n1, n2).
+    """
+    return torch.ops.spectral.fft2_c2r.default(x, n2, impl, columns)

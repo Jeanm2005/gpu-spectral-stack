@@ -24,4 +24,10 @@ void c2r_stockham_r8_table(const cf32* x, float* y, int n, int batch, cf32* /*wo
     stockham::c2r<8, true>(x, y, n, batch, stream);
 }
 
+void columns_stockham_r8_table(const cf32* x, cf32* y, int n, int cols, int slabs,
+                               Direction direction, cudaStream_t stream)
+{
+    stockham::columns<8, true>(x, y, n, cols, slabs, direction, stream);
+}
+
 }  // namespace spectral::fft

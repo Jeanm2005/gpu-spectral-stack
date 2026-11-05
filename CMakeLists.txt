@@ -34,6 +34,7 @@ set(SPECTRAL_COMPILE_OPTIONS
 add_library(spectral_core STATIC
   csrc/common/bench.cpp
   csrc/ops/scale.cu
+  csrc/fft/fft2d.cu
   csrc/fft/naive.cu
   csrc/fft/real.cu
   csrc/fft/stockham_r2.cu

@@ -44,4 +44,15 @@ namespace spectral::fft {
     void c2r_stockham_r8(const cf32* x, float* y, int n, int batch, cf32* work, cudaStream_t stream);
     void r2c_stockham_r8_table(const float* x, cf32* y, int n, int batch, cf32* work, cudaStream_t stream);
     void c2r_stockham_r8_table(const cf32* x, float* y, int n, int batch, cf32* work, cudaStream_t stream);
+
+    // Column transforms (Task 1.6): `slabs` row-major arrays of n rows by `cols` columns, back
+    // to back; transforms every column (n points, stride cols) straight from that layout, in
+    // place when x == y. Only implementations with a strided kernel provide one.
+    using ColumnsFn = void (*)(const cf32* x, cf32* y, int n, int cols, int slabs,
+                               Direction direction, cudaStream_t stream);
+
+    void columns_stockham_r2(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction, cudaStream_t stream);
+    void columns_stockham_r4(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction, cudaStream_t stream);
+    void columns_stockham_r8(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction, cudaStream_t stream);
+    void columns_stockham_r8_table(const cf32* x, cf32* y, int n, int cols, int slabs, Direction direction, cudaStream_t stream);
 }

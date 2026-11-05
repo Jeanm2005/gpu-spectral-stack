@@ -31,7 +31,7 @@ Conventions
 - [X] 1.3 Radix-4 and mixed radix 2/4/8; twiddle factors from a table vs computed on the fly
 - [ ] 1.4 (optional) Multi-block FFT for N beyond shared memory (four-step algorithm)
 - [X] 1.5 Real-to-complex (R2C) and complex-to-real (C2R) through the N/2-point complex trick
-- [ ] 1.6 2D FFT: row transforms then column transforms (transpose vs strided), rfft2/irfft2
+- [X] 1.6 2D FFT: row transforms then column transforms (transpose vs strided), rfft2/irfft2
 - [ ] 1.7 Pruned transforms: forward that outputs only the first k modes, inverse that
       reads only k non-zero modes
 - [ ] 1.8 Results: table against cuFFT by size and batch, roofline, profiling log, README

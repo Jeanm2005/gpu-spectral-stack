@@ -108,3 +108,19 @@ Work fft_real_work(long long n, long long batch)
     w.bytes = rows * (4.0 * real_n + 8.0 * (real_n / 2.0 + 1.0));  // float32 + complex64 sides
     return w;
 }
+
+Work fft2_c2c_work(long long n1, long long n2, long long batch)
+{
+    return fft_c2c_work(n1 * n2, batch);
+}
+
+Work fft2_real_work(long long n1, long long n2, long long batch)
+{
+    const double points = static_cast<double>(n1) * static_cast<double>(n2);
+    const double arrays = static_cast<double>(batch);
+    Work w;
+    w.flops = 2.5 * points * arrays * std::log2(points);
+    w.bytes = arrays
+              * (4.0 * points + 8.0 * static_cast<double>(n1) * (static_cast<double>(n2) / 2 + 1));
+    return w;
+}

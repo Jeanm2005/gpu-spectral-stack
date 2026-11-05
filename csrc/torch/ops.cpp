@@ -16,6 +16,7 @@
 #include <torch/library.h>
 
 #include "common/types.hpp"
+#include "fft/fft2d.hpp"
 #include "fft/registry.hpp"
 #include "ops/scale.hpp"
 
@@ -179,6 +180,134 @@ at::Tensor fft_c2r_cuda(const at::Tensor& x, int64_t n, c10::string_view impl_na
     return y;
 }
 
+// --- 2D (Task 1.6) ------------------------------------------------------------------------------
+
+// "auto" picks the strided column kernel when the implementation has one.
+spectral::fft::Columns parse_columns(c10::string_view text, const spectral::fft::FftImpl& impl)
+{
+    const std::string s(text.data(), text.size());
+    if (s == "auto") {
+        return impl.columns != nullptr ? spectral::fft::Columns::Strided
+                                       : spectral::fft::Columns::Transpose;
+    }
+    if (s == "strided") {
+        TORCH_CHECK(impl.columns != nullptr, impl.name,
+                    " has no strided column kernel; use columns=\"transpose\"");
+        return spectral::fft::Columns::Strided;
+    }
+    TORCH_CHECK(s == "transpose", "columns must be \"auto\", \"strided\", or \"transpose\", got '",
+                s, "'");
+    return spectral::fft::Columns::Transpose;
+}
+
+struct Shape2d {
+    int64_t n1;
+    int64_t n2;
+    int batch;
+};
+
+// The last two dimensions of x are one array of n1 x n2 points, stored with n2_stored values per
+// row (n2 for complex or real data, n2/2 + 1 for the complex side of a real transform). The
+// sizes themselves are checked by fft2d.cu.
+Shape2d shape2d(const at::Tensor& x, int64_t n2, int64_t n2_stored, const char* op)
+{
+    TORCH_CHECK(x.dim() >= 2, op, ": x needs at least two dimensions");
+    const int64_t n1 = x.size(-2);
+    TORCH_CHECK(n1 >= 1 && n2 >= 1, op, ": empty transform dimensions");
+    return {n1, n2, batch_of(x, n1 * n2_stored, op)};
+}
+
+at::Tensor workspace(std::size_t count, const at::Tensor& like)
+{
+    return at::empty({static_cast<int64_t>(count)}, like.options().dtype(at::kComplexFloat));
+}
+
+at::Tensor fft2_c2c_cuda(const at::Tensor& x, bool inverse, c10::string_view impl_name,
+                         c10::string_view columns)
+{
+    check_complex64_cuda(x, "x");
+    const spectral::fft::FftImpl& impl = find_impl(impl_name);
+    const spectral::fft::Columns method = parse_columns(columns, impl);
+    TORCH_CHECK(x.dim() >= 2, "fft2_c2c: x needs at least two dimensions");
+    if (x.numel() == 0) {
+        return at::empty_like(x, at::MemoryFormat::Contiguous);
+    }
+    const Shape2d s = shape2d(x, x.size(-1), x.size(-1), "fft2_c2c");
+
+    const c10::cuda::CUDAGuard device_guard(x.device());
+    const at::Tensor xc = x.contiguous();
+    at::Tensor y = at::empty_like(xc);
+    const auto n1 = static_cast<int>(s.n1);
+    const auto n2 = static_cast<int>(s.n2);
+    at::Tensor work = workspace(spectral::fft::fft2_c2c_workspace(impl, method, n1, n2, s.batch),
+                                x);
+    spectral::fft::fft2_c2c(
+        impl, method, as_cf32(xc), as_cf32_mut(y), n1, n2, s.batch,
+        inverse ? spectral::fft::Direction::Inverse : spectral::fft::Direction::Forward,
+        workspace_ptr(work), at::cuda::getCurrentCUDAStream());
+    return y;
+}
+
+at::Tensor fft2_r2c_cuda(const at::Tensor& x, c10::string_view impl_name,
+                         c10::string_view columns)
+{
+    TORCH_CHECK(x.is_cuda(), "x must be a CUDA tensor");
+    TORCH_CHECK(x.scalar_type() == at::kFloat, "x must be float32, got ", x.scalar_type());
+    const spectral::fft::FftImpl& impl = find_impl(impl_name);
+    const spectral::fft::Columns method = parse_columns(columns, impl);
+    TORCH_CHECK(x.dim() >= 2, "fft2_r2c: x needs at least two dimensions");
+    const int64_t n2 = x.size(-1);
+    check_real_size(n2, impl, "fft2_r2c");
+
+    std::vector<int64_t> shape = x.sizes().vec();
+    shape.back() = n2 / 2 + 1;
+    at::Tensor y = at::empty(shape, x.options().dtype(at::kComplexFloat));
+    if (x.numel() == 0) {
+        return y;
+    }
+    const Shape2d s = shape2d(x, n2, n2, "fft2_r2c");
+
+    const c10::cuda::CUDAGuard device_guard(x.device());
+    const at::Tensor xc = x.contiguous();
+    const auto n1 = static_cast<int>(s.n1);
+    at::Tensor work = workspace(
+        spectral::fft::fft2_r2c_workspace(impl, method, n1, static_cast<int>(n2), s.batch), x);
+    spectral::fft::fft2_r2c(impl, method, xc.const_data_ptr<float>(), as_cf32_mut(y), n1,
+                            static_cast<int>(n2), s.batch, workspace_ptr(work),
+                            at::cuda::getCurrentCUDAStream());
+    return y;
+}
+
+at::Tensor fft2_c2r_cuda(const at::Tensor& x, int64_t n2, c10::string_view impl_name,
+                         c10::string_view columns)
+{
+    check_complex64_cuda(x, "x");
+    const spectral::fft::FftImpl& impl = find_impl(impl_name);
+    const spectral::fft::Columns method = parse_columns(columns, impl);
+    TORCH_CHECK(x.dim() >= 2, "fft2_c2r: x needs at least two dimensions");
+    check_real_size(n2, impl, "fft2_c2r");
+    TORCH_CHECK(x.size(-1) == n2 / 2 + 1, "fft2_c2r: an output of ", n2,
+                " columns needs n2/2 + 1 = ", n2 / 2 + 1, " input columns, got ", x.size(-1));
+
+    std::vector<int64_t> shape = x.sizes().vec();
+    shape.back() = n2;
+    at::Tensor y = at::empty(shape, x.options().dtype(at::kFloat));
+    if (x.numel() == 0) {
+        return y;
+    }
+    const Shape2d s = shape2d(x, n2, n2 / 2 + 1, "fft2_c2r");
+
+    const c10::cuda::CUDAGuard device_guard(x.device());
+    const at::Tensor xc = x.contiguous();
+    const auto n1 = static_cast<int>(s.n1);
+    at::Tensor work = workspace(
+        spectral::fft::fft2_c2r_workspace(impl, method, n1, static_cast<int>(n2), s.batch), x);
+    spectral::fft::fft2_c2r(impl, method, as_cf32(xc), y.mutable_data_ptr<float>(), n1,
+                            static_cast<int>(n2), s.batch, workspace_ptr(work),
+                            at::cuda::getCurrentCUDAStream());
+    return y;
+}
+
 // spectral._C.fft_impls(): the names in fft/registry.hpp, in order, as a tuple of str.
 PyObject* py_fft_impls(PyObject*, PyObject*)
 {
@@ -211,6 +340,10 @@ TORCH_LIBRARY(spectral, m)
     m.def("fft_c2c(Tensor x, bool inverse=False, str impl=\"naive\") -> Tensor");
     m.def("fft_r2c(Tensor x, str impl=\"naive\") -> Tensor");
     m.def("fft_c2r(Tensor x, int n, str impl=\"naive\") -> Tensor");
+    m.def("fft2_c2c(Tensor x, bool inverse=False, str impl=\"naive\", str columns=\"auto\")"
+          " -> Tensor");
+    m.def("fft2_r2c(Tensor x, str impl=\"naive\", str columns=\"auto\") -> Tensor");
+    m.def("fft2_c2r(Tensor x, int n2, str impl=\"naive\", str columns=\"auto\") -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(spectral, CUDA, m)
@@ -219,6 +352,9 @@ TORCH_LIBRARY_IMPL(spectral, CUDA, m)
     m.impl("fft_c2c", &fft_c2c_cuda);
     m.impl("fft_r2c", &fft_r2c_cuda);
     m.impl("fft_c2r", &fft_c2r_cuda);
+    m.impl("fft2_c2c", &fft2_c2c_cuda);
+    m.impl("fft2_r2c", &fft2_r2c_cuda);
+    m.impl("fft2_c2r", &fft2_c2r_cuda);
 }
 
 // Importing spectral._C from Python runs this. Loading the shared library runs the

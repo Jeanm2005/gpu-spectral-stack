@@ -22,6 +22,13 @@ public:
         CUFFT_CHECK(cufftPlanMany(&plan_, 1, &nfft, nullptr, 1, nfft, nullptr, 1, nfft, type,
                                   batch));
     }
+    // `batch` two-dimensional transforms of n1 rows by n2 columns, row-major, back to back
+    // (the complex side of a real transform has n2/2 + 1 columns).
+    FftPlan(int n1, int n2, int batch, cufftType type)
+    {
+        int n[2] = {n1, n2};
+        CUFFT_CHECK(cufftPlanMany(&plan_, 2, n, nullptr, 1, 0, nullptr, 1, 0, type, batch));
+    }
     ~FftPlan()
     {
         const cufftResult err = cufftDestroy(plan_);

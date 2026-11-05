@@ -54,3 +54,9 @@ Work fft_c2c_work(long long n, long long batch);
 // complex transform, 2.5 N log2 N, and n float32 values on the real side plus n/2 + 1 complex64
 // values on the complex side. spectral.benchmark.fft_real_work matches it.
 Work fft_real_work(long long n, long long batch);
+
+// 2D transforms of n1 x n2 points by the same conventions: 5 N log2 N flops for complex and
+// 2.5 N log2 N for real transforms, N = n1 n2, and each input and output moved once (the
+// complex side of a real transform holds n1 (n2/2 + 1) values).
+Work fft2_c2c_work(long long n1, long long n2, long long batch);
+Work fft2_real_work(long long n1, long long n2, long long batch);
