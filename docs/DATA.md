@@ -2,6 +2,38 @@
 
 How the Phase 2 training data is generated, stored, and checked. Code: `python/spectral/flow/`.
 
+## The pipeline: one command
+
+```bash
+dvc repro          # generate -> validate -> report, for whatever params.yaml changed
+dvc push           # send the dataset to the DVC remote
+dvc pull           # on another machine: fetch the version dvc.lock names
+```
+
+`dvc.yaml` has three stages, all run by `python -m spectral.flow.pipeline`:
+
+| Stage | Reads | Writes |
+|---|---|---|
+| generate | `params.yaml` (`dataset`, `layout`) | `data/flow.zarr` |
+| validate | the dataset, `params.yaml` (`validation`) | `reports/validation.json`; exits 1 if any check fails, which stops `dvc repro` |
+| report | the dataset, the validation report | `reports/DATASET_CARD.md`, `reports/samples.png` |
+
+`dvc.lock` (committed) records the content hash of every output: a commit of the repository
+pins a dataset version exactly. The dataset itself lives in the DVC cache and the remote, never
+in git. The dataset card (reports/DATASET_CARD.md) is rewritten for every version: contents,
+provenance (config hash, git commit, seeds), statistics, and the validation verdict.
+
+The default remote is a local directory, set up per machine (not committed, since the path is
+machine-specific):
+
+```bash
+mkdir -p ~/dvc-storage/gpu-spectral-stack
+dvc remote add --local -d local ~/dvc-storage/gpu-spectral-stack
+```
+
+CI runs the same pipeline on `configs/ci-params.yaml`: four 32 x 32 trajectories through the
+float64 NumPy solver, so a change that breaks generation, validation, or the card fails CI.
+
 ## What a dataset holds
 
 Trajectories of 2D incompressible flow in vorticity form on the periodic box [0, 2π)², with

@@ -7,6 +7,8 @@ matplotlib
 pytest
 ruff
 zarr>=3
+dvc
+pyyaml
 ninja
 setuptools>=77
 wheel
