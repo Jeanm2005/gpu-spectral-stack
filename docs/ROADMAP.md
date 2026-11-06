@@ -44,7 +44,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
 
 ## Phase 2: Physics solver and data pipeline (January)
 
-- [ ] 2.1 NumPy reference solver (float64, CPU): ground truth that also runs in CI
+- [X] 2.1 NumPy reference solver (float64, CPU): ground truth that also runs in CI
 - [ ] 2.2 GPU pseudo-spectral 2D Navier–Stokes (vorticity form) on our rfft2: 2/3-rule
       dealiasing, Kolmogorov forcing, RK4 or IMEX time stepping. Validation: Taylor–Green
       exact decay, energy/enstrophy budget, agreement with 2.1
