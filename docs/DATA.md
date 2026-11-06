@@ -90,6 +90,30 @@ fields agree with it):
 | `samples`, `frames` | int | dataset size |
 | `solver` | object | backend, fft_impl, pruned |
 
+## Reading the data for training
+
+`flow.loader` streams training items from a dataset:
+
+```python
+from spectral.flow.loader import CudaPrefetcher, WindowDataset, make_loader
+
+dataset = WindowDataset("data/flow.zarr", inputs=10, outputs=1, seed=0)
+loader = make_loader(dataset, batch_size=32, num_workers=4)  # pinned memory, prefetching
+for epoch in range(epochs):
+    dataset.set_epoch(epoch)
+    for batch in CudaPrefetcher(loader):  # next batch copied to the GPU on a side stream
+        batch["input"], batch["target"], batch["viscosity"]
+```
+
+An item is a window of one trajectory: `inputs` consecutive frames and the `outputs` frames
+after them. Every window appears exactly once per epoch, in an order fixed by (seed, epoch).
+Each worker reads whole shards (16 trajectories in one request, the fastest pattern in the
+study below) and mixes the windows of several shards in a shuffle buffer. `samples=` restricts
+a dataset to some trajectories, for train / test splits.
+
+`tools/loader_profile.py` measures what the loader delivers and how much of the time a GPU
+consumer spends waiting for it, with the PyTorch profiler.
+
 ## Chunk-size study
 
 `python tools/chunk_study.py --out docs/results/chunk_study.csv` writes one simulated dataset
