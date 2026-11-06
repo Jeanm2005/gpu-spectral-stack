@@ -14,7 +14,13 @@ Checks, each with its threshold in Thresholds:
                   with dE/dt = <u.F> - 2 nu Z - 2 alpha E integrated over the interval
                   (trapezoid rule), to max_energy_residual of the trajectory's mean energy.
                   Catches instability and solver errors that stay inside the bounds
-    parameters    viscosities inside the configured range and, from 20 samples on, consistent
+    resolved      the grid resolves the dissipation range: k_max / k_d >= min_resolution, with
+                  k_max = n/3 the largest wavenumber the 2/3 rule keeps and k_d = (beta/nu^3)^(1/6)
+                  the Kraichnan dissipation wavenumber of 2D turbulence, beta = 2 nu P the
+                  enstrophy dissipation rate (P averaged over the trajectory). Below 1, enstrophy
+                  piles up at the cutoff: the run is stable and its budget closes, but its small
+                  scales are an artefact of the grid
+    parameters   viscosities inside the configured range and, from 20 samples on, consistent
                   with a log-uniform distribution (Kolmogorov-Smirnov, p >= min_ks_pvalue)
     provenance    every stored seed is the one flow.generate derives for that sample, and the
                   time axis matches the config
@@ -45,6 +51,7 @@ class Thresholds:
     max_abs_vorticity: float = 1e3
     max_cfl: float = 1.0
     max_energy_residual: float = 0.05
+    min_resolution: float = 1.0
     min_ks_pvalue: float = 1e-3
 
 
@@ -69,11 +76,16 @@ def trajectory_stats(w: np.ndarray, viscosity: float, ds: Dataset) -> dict:
     u_hat, v_hat = solver.velocity_hat(reference.to_spectral(w, grid))
     speed = np.sqrt(reference.irfft2(u_hat, config.n) ** 2 + reference.irfft2(v_hat, config.n) ** 2)
     dx = 2.0 * np.pi / config.n
+
+    beta = 2.0 * viscosity * float(d["palinstrophy"].mean())  # enstrophy dissipation rate
+    k_d = (beta / viscosity**3) ** (1.0 / 6.0) if viscosity > 0 and beta > 0 else 0.0
+    resolution = (config.n // 3) / k_d if k_d > 0 else float("inf")
     return {
         "viscosity": viscosity,
         "max_abs_vorticity": float(np.abs(w).max()),
         "max_cfl": float(speed.max() * config.dt / dx),
         "energy_residual": float(np.abs(residual).max() / scale) if residual.size else 0.0,
+        "resolution": resolution,
         "energy": d["energy"].tolist(),
         "enstrophy": d["enstrophy"].tolist(),
     }
@@ -115,6 +127,18 @@ def validate(ds: Dataset, thresholds: Thresholds | None = None) -> dict:
         "passed": not bad,
         "samples": bad,
         "limit": thresholds.max_energy_residual,
+    }
+    bad = [
+        i
+        for i, s in enumerate(stats)
+        if s is not None and s["resolution"] < thresholds.min_resolution
+    ]
+    resolutions = [s["resolution"] for s in stats if s is not None]
+    checks["resolved"] = {
+        "passed": not bad,
+        "samples": bad,
+        "limit": thresholds.min_resolution,
+        "worst": float(min(resolutions)) if resolutions else None,
     }
 
     written = ~np.isin(np.arange(config.num_samples), missing)
