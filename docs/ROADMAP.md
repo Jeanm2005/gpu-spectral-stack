@@ -50,7 +50,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
       exact decay, energy/enstrophy budget, agreement with 2.1
 - [X] 2.3 Batched generation: many trajectories per launch, Gaussian-random-field initial
       conditions, config → hash + seed recorded for every sample
-- [ ] 2.4 Storage: sharded Zarr, metadata schema (resolution, dt, viscosity, seed, git commit),
+- [X] 2.4 Storage: sharded Zarr, metadata schema (resolution, dt, viscosity, seed, git commit),
       chunk-size study measured against training reads
 - [ ] 2.5 Validation stage: NaN/blowup, energy drift, parameter-distribution report; a bad
       dataset fails the pipeline

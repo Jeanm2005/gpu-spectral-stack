@@ -6,6 +6,7 @@ scipy
 matplotlib
 pytest
 ruff
+zarr>=3
 ninja
 setuptools>=77
 wheel
