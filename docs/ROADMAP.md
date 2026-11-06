@@ -48,7 +48,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
 - [X] 2.2 GPU pseudo-spectral 2D Navier–Stokes (vorticity form) on our rfft2: 2/3-rule
       dealiasing, Kolmogorov forcing, RK4 or IMEX time stepping. Validation: Taylor–Green
       exact decay, energy/enstrophy budget, agreement with 2.1
-- [ ] 2.3 Batched generation: many trajectories per launch, Gaussian-random-field initial
+- [X] 2.3 Batched generation: many trajectories per launch, Gaussian-random-field initial
       conditions, config → hash + seed recorded for every sample
 - [ ] 2.4 Storage: sharded Zarr, metadata schema (resolution, dt, viscosity, seed, git commit),
       chunk-size study measured against training reads

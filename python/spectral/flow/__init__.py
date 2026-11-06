@@ -11,6 +11,7 @@ with Kolmogorov forcing f(y) = -A k_f cos(k_f y), the curl of the body force A s
     flow.params      Flow: the physical parameters, and the spectral grid they live on
     flow.reference   the float64 NumPy solver (Task 2.1): the ground truth, runs anywhere
     flow.gpu         the batched float32 GPU solver on our FFTs (Task 2.2)
+    flow.generate    datasets of trajectories: configs, hashes, per-sample seeds (Task 2.3)
 """
 
 from .params import Flow, Grid
