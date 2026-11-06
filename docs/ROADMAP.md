@@ -52,7 +52,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
       conditions, config → hash + seed recorded for every sample
 - [X] 2.4 Storage: sharded Zarr, metadata schema (resolution, dt, viscosity, seed, git commit),
       chunk-size study measured against training reads
-- [ ] 2.5 Validation stage: NaN/blowup, energy drift, parameter-distribution report; a bad
+- [X] 2.5 Validation stage: NaN/blowup, energy drift, parameter-distribution report; a bad
       dataset fails the pipeline
 - [ ] 2.6 Versioning: DVC pipeline (generate → validate → report), DVC remote, `dvc repro`
       as the one command
