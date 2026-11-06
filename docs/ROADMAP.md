@@ -54,7 +54,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
       chunk-size study measured against training reads
 - [X] 2.5 Validation stage: NaN/blowup, energy drift, parameter-distribution report; a bad
       dataset fails the pipeline
-- [ ] 2.6 Versioning: DVC pipeline (generate → validate → report), DVC remote, `dvc repro`
+- [X] 2.6 Versioning: DVC pipeline (generate → validate → report), DVC remote, `dvc repro`
       as the one command
 - [ ] 2.7 Loader: streaming Dataset, pinned memory, prefetching; GPU idle time measured with
       the PyTorch profiler
