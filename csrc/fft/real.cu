@@ -79,7 +79,7 @@ void c2r_preprocess(const cf32* x, cf32* z, int m, int batch, int keep, cudaStre
 }
 
 void check_arguments(const void* real_side, const void* complex_side, int n, int batch,
-                     int max_n, const char* who)
+                     int complex_row, int max_n, const char* who)
 {
     const std::string name(who);
     if (n < 2 || n > max_n || (n & (n - 1)) != 0) {
@@ -94,7 +94,7 @@ void check_arguments(const void* real_side, const void* complex_side, int n, int
     const auto* r = static_cast<const char*>(real_side);
     const auto* c = static_cast<const char*>(complex_side);
     const std::size_t real_bytes = rows * static_cast<std::size_t>(n) * sizeof(float);
-    const std::size_t complex_bytes = rows * (static_cast<std::size_t>(n) / 2 + 1) * sizeof(cf32);
+    const std::size_t complex_bytes = rows * static_cast<std::size_t>(complex_row) * sizeof(cf32);
     if (r < c + complex_bytes && c < r + real_bytes) {
         throw std::invalid_argument(name + ": input and output must not overlap");
     }
@@ -105,7 +105,7 @@ void check_arguments(const void* real_side, const void* complex_side, int n, int
 void r2c_via_c2c(C2cFn c2c, const float* x, cf32* y, int n, int batch, cf32* work,
                  cudaStream_t stream)
 {
-    real::check_arguments(x, y, n, batch, 1 << 30, "r2c");
+    real::check_arguments(x, y, n, batch, n / 2 + 1, 1 << 30, "r2c");
     if (work == nullptr) {
         throw std::invalid_argument("r2c: this implementation needs a workspace");
     }
@@ -117,7 +117,7 @@ void r2c_via_c2c(C2cFn c2c, const float* x, cf32* y, int n, int batch, cf32* wor
 void c2r_via_c2c(C2cFn c2c, const cf32* x, float* y, int n, int batch, cf32* work,
                  cudaStream_t stream)
 {
-    real::check_arguments(y, x, n, batch, 1 << 30, "c2r");
+    real::check_arguments(y, x, n, batch, n / 2 + 1, 1 << 30, "c2r");
     if (work == nullptr) {
         throw std::invalid_argument("c2r: this implementation needs a workspace");
     }

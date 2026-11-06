@@ -586,8 +586,8 @@ inline void check_keep(int keep, int n, const char* who)
 template <int R, bool Table>
 void r2c(const float* x, cf32* y, int n, int batch, cudaStream_t stream, int keep)
 {
-    real::check_arguments(x, y, n, batch, kRealMaxN, "stockham r2c");
     check_keep(keep, n, "stockham r2c");
+    real::check_arguments(x, y, n, batch, keep, kRealMaxN, "stockham r2c");
     const int m = n / 2;
     const auto* z = reinterpret_cast<const cf32*>(x);  // n reals are m complex values
     if (m == 1) {  // a 1-point DFT is the identity: only the combine step is left
@@ -607,8 +607,8 @@ void r2c(const float* x, cf32* y, int n, int batch, cudaStream_t stream)
 template <int R, bool Table>
 void c2r(const cf32* x, float* y, int n, int batch, cudaStream_t stream, int keep)
 {
-    real::check_arguments(y, x, n, batch, kRealMaxN, "stockham c2r");
     check_keep(keep, n, "stockham c2r");
+    real::check_arguments(y, x, n, batch, keep, kRealMaxN, "stockham c2r");
     const int m = n / 2;
     auto* z = reinterpret_cast<cf32*>(y);
     if (m == 1) {
