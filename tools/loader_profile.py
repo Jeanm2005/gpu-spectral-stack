@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 import tempfile
 import time
@@ -75,7 +76,21 @@ def consume(batch: dict, work: int) -> None:
         x = spectral.irfft2(spectral.rfft2(x, impl="stockham_r8"), x.shape[-1], impl="stockham_r8")
 
 
+def drop_cache(path: Path) -> None:
+    """Evicts the dataset's files from the page cache (no root needed), so every setting starts
+    reading from disk rather than from what the previous setting left in memory."""
+    os.sync()
+    for f in Path(path).rglob("*"):
+        if f.is_file():
+            fd = os.open(f, os.O_RDONLY)
+            try:
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            finally:
+                os.close(fd)
+
+
 def run(path, workers, pin, prefetch, batch_size, steps, warmup, work, inputs):
+    drop_cache(path)
     ds = WindowDataset(path, inputs=inputs, outputs=1, seed=0)
     loader = make_loader(ds, batch_size, num_workers=workers, pin_memory=pin)
     source = CudaPrefetcher(loader) if prefetch else loader

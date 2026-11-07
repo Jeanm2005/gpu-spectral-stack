@@ -56,7 +56,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
       dataset fails the pipeline
 - [X] 2.6 Versioning: DVC pipeline (generate → validate → report), DVC remote, `dvc repro`
       as the one command
-- [ ] 2.7 Loader: streaming Dataset, pinned memory, prefetching; GPU idle time measured with
+- [X] 2.7 Loader: streaming Dataset, pinned memory, prefetching; GPU idle time measured with
       the PyTorch profiler
 - [ ] 2.8 Throughput report: sims/s, write MB/s, loader samples/s
 

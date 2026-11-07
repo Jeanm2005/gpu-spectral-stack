@@ -114,6 +114,41 @@ a dataset to some trajectories, for train / test splits.
 `tools/loader_profile.py` measures what the loader delivers and how much of the time a GPU
 consumer spends waiting for it, with the PyTorch profiler.
 
+### Does the GPU wait for data?
+
+`python tools/loader_profile.py data/flow.zarr --out docs/results/loader.csv`, on the 128²
+dataset: batches of 32 windows (10 frames in, 1 out), the page cache dropped before each
+setting, the GPU clock locked. The consumer stands in for a training step with `work` round
+trips of our rfft2 / irfft2 per batch; GPU busy and idle time come from the profiler trace.
+
+| GPU work per batch | Workers | Pinned | Prefetcher | Windows/s | GPU busy (ms/step) | GPU idle |
+|---|---:|---|---|---:|---:|---:|
+| none (loader alone) | 0 | no | no | 176 | 3.8 | 98 % |
+| none | 4 | yes | yes | 4524 | 4.7 | 33 % |
+| none | 8 | yes | yes | 5086 | 5.2 | 16 % |
+| ~2 ms (4 round trips) | 0 | no | no | 235 | 14.6 | 89 % |
+| ~2 ms | 4 | no | no | 4835 | 3.8 | 41 % |
+| ~2 ms | 4 | yes | yes | 4212 | 1.9 | 74 % |
+| ~10.5 ms (32 round trips) | 0 | no | no | 236 | 12.7 | 91 % |
+| ~10.5 ms | 2 | yes | yes | 2883 | 10.6 | **4.5 %** |
+| ~10.5 ms | 4 | yes | yes | 2903 | 10.5 | **4.5 %** |
+| ~10.5 ms | 4 | no | no | 2287 | 13.1 | 5.8 % |
+
+(Every setting at every amount of work is in the CSV.)
+
+- **Reading in the main process starves the GPU** whatever it has to do: about 230 windows/s,
+  the GPU idle 90 % of the time. Worker processes are not optional.
+- **The loader tops out at 4500-5100 windows/s** with 4-8 workers, about 7 ms per batch of 32.
+  A training step that takes less than that per batch waits for data: at ~2 ms of GPU work the
+  GPU idles 68-74 %.
+- **Past that, the GPU stays busy.** At ~10.5 ms per batch the GPU idles 4.5 % with 2 or more
+  workers, pinned memory, and the prefetcher; a model at 128² with a few spectral layers is
+  expected to need at least that much per batch, so the loader should not be what limits
+  training.
+- **Pinned memory moves the copies off the GPU's critical path.** From pageable memory the
+  host-to-device copy is synchronous and shows up as extra busy time (3.8 instead of 1.9 ms per
+  step at ~2 ms of work); from pinned memory, with the prefetcher, it overlaps the work.
+
 ## Chunk-size study
 
 `python tools/chunk_study.py --out docs/results/chunk_study.csv` writes one simulated dataset
