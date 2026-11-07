@@ -1,0 +1,34 @@
+# The CI-sized pipeline: params.yaml shrunk to run on a GitHub runner without a GPU, through the
+# float64 NumPy reference solver. CI copies it over params.yaml and runs `dvc repro`.
+
+dataset:
+  n: 32
+  dt: 0.005
+  record_every: 20
+  frames: 8
+  spinup_steps: 100
+  num_samples: 4
+  seed: 0
+  viscosity_min: 5.0e-2
+  viscosity_max: 1.0e-1
+  drag: 0.1
+  forcing_amplitude: 1.0
+  forcing_wavenumber: 4
+  ic_alpha: 2.5
+  ic_tau: 7.0
+  ic_rms: 5.0
+  backend: numpy
+  fft_impl: stockham_r8
+  pruned: true
+  batch_size: 4
+
+layout:
+  chunk_frames: 8
+  samples_per_shard: 16
+  compression: false
+
+validation:
+  max_abs_vorticity: 1000.0
+  max_cfl: 1.0
+  max_energy_residual: 0.05
+  min_ks_pvalue: 0.001

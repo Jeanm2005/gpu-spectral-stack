@@ -35,6 +35,27 @@ On top of them (`python/spectral/ops.py`):
 All of them are checked against float64 NumPy references with a tolerance that grows with
 log2 N (`python/spectral/testing.py`).
 
+## Phase 2: physics solver and training data
+
+`python/spectral/flow/` simulates 2D turbulence (incompressible Navier-Stokes in vorticity form,
+Kolmogorov forcing) and turns it into a versioned, validated dataset. Details:
+[docs/DATA.md](docs/DATA.md).
+
+- a float64 NumPy reference solver and a batched GPU solver on our FFTs, checked against exact
+  solutions (Taylor-Green, laminar Kolmogorov flow), the energy and enstrophy budgets, and each
+  other; with the pruned transforms of Phase 1 the GPU solver runs 2.15x faster than on cuFFT
+- datasets defined by a hashed config, each trajectory reproducible from its own seed, stored as
+  sharded Zarr with a checked metadata schema
+- validation that fails the pipeline on missing, non-finite, unstable, under-resolved, or
+  mis-sampled data
+- `dvc repro`: generate, validate, and write a dataset card, with `dvc.lock` pinning each
+  version; CI runs the pipeline end to end on a CPU-sized config
+- a streaming training loader (shard reads, worker processes, pinned memory, a CUDA prefetcher)
+  that keeps the GPU busy, measured with the PyTorch profiler
+
+The current dataset: 1024 trajectories at 128², 32 frames each, viscosity 1e-3 to 5e-3, every
+trajectory resolved ([dataset card](reports/DATASET_CARD.md)).
+
 ## Results
 
 Measured on an RTX 5080 Laptop GPU with the core clock locked; machine, conditions, and every

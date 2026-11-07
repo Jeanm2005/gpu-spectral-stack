@@ -71,8 +71,9 @@ void r2c_postprocess(const cf32* z, cf32* y, int m, int batch, int keep, cudaStr
 void c2r_preprocess(const cf32* x, cf32* z, int m, int batch, int keep, cudaStream_t stream);
 
 // Throws std::invalid_argument unless n is a power of two in [2, max_n], batch >= 1, and the
-// real side (n floats per row) and complex side (n/2 + 1 values per row) do not overlap.
+// real side (n floats per row) and complex side (complex_row values per row: n/2 + 1, or fewer
+// for a pruned transform) do not overlap.
 void check_arguments(const void* real_side, const void* complex_side, int n, int batch,
-                     int max_n, const char* who);
+                     int complex_row, int max_n, const char* who);
 
 }  // namespace spectral::fft::real

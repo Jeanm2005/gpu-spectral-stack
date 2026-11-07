@@ -1,0 +1,44 @@
+# The data pipeline (Task 2.6): generate -> validate -> report. Run it with `dvc repro`;
+# parameters are in params.yaml. A failed validation stops the pipeline before the report.
+
+stages:
+  generate:
+    cmd: python -m spectral.flow.pipeline generate --params params.yaml --out data/flow.zarr
+    deps:
+      - python/spectral/flow/generate.py
+      - python/spectral/flow/gpu.py
+      - python/spectral/flow/params.py
+      - python/spectral/flow/reference.py
+      - python/spectral/flow/store.py
+    params:
+      - dataset
+      - layout
+    outs:
+      - data/flow.zarr
+
+  validate:
+    cmd: >-
+      python -m spectral.flow.pipeline validate --params params.yaml --data data/flow.zarr
+      --report reports/validation.json
+    deps:
+      - data/flow.zarr
+      - python/spectral/flow/validate.py
+    params:
+      - validation
+    outs:
+      - reports/validation.json:
+          cache: false
+
+  report:
+    cmd: >-
+      python -m spectral.flow.pipeline report --data data/flow.zarr
+      --validation reports/validation.json --out reports
+    deps:
+      - data/flow.zarr
+      - reports/validation.json
+      - python/spectral/flow/pipeline.py
+    outs:
+      - reports/DATASET_CARD.md:
+          cache: false
+      - reports/samples.png:
+          cache: false

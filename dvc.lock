@@ -1,0 +1,109 @@
+schema: '2.0'
+stages:
+  generate:
+    cmd: python -m spectral.flow.pipeline generate --params params.yaml --out 
+      data/flow.zarr
+    deps:
+    - path: python/spectral/flow/generate.py
+      hash: md5
+      md5: 59ac56306ee88d1269eddaf78056fac4
+      size: 8378
+    - path: python/spectral/flow/gpu.py
+      hash: md5
+      md5: b1d20cbeb4f71ada3937fa980a66c0fb
+      size: 6609
+    - path: python/spectral/flow/params.py
+      hash: md5
+      md5: caeb6d2e1744419d7569ff293f5c153d
+      size: 3861
+    - path: python/spectral/flow/reference.py
+      hash: md5
+      md5: 979f12b1dcdb777c40eb868c508d0496
+      size: 6134
+    - path: python/spectral/flow/store.py
+      hash: md5
+      md5: 778f8ee4544dc60dd0089b91d6ecf694
+      size: 9514
+    params:
+      params.yaml:
+        dataset:
+          n: 128
+          dt: 0.0025
+          record_every: 40
+          frames: 32
+          spinup_steps: 2000
+          num_samples: 1024
+          seed: 0
+          viscosity_min: 0.001
+          viscosity_max: 0.005
+          drag: 0.1
+          forcing_amplitude: 1.0
+          forcing_wavenumber: 4
+          ic_alpha: 2.5
+          ic_tau: 7.0
+          ic_rms: 5.0
+          backend: gpu
+          fft_impl: stockham_r8
+          pruned: true
+          batch_size: 256
+        layout:
+          chunk_frames: 8
+          samples_per_shard: 16
+          compression: false
+    outs:
+    - path: data/flow.zarr
+      hash: md5
+      md5: a5c1d680ef45ee236843d8be648d9210.dir
+      size: 2147566260
+      nfiles: 74
+  validate:
+    cmd: python -m spectral.flow.pipeline validate --params params.yaml --data 
+      data/flow.zarr --report reports/validation.json
+    deps:
+    - path: data/flow.zarr
+      hash: md5
+      md5: a5c1d680ef45ee236843d8be648d9210.dir
+      size: 2147566260
+      nfiles: 74
+    - path: python/spectral/flow/validate.py
+      hash: md5
+      md5: 12bc6dfde88b74d6987cf3acc0043c40
+      size: 8955
+    params:
+      params.yaml:
+        validation:
+          max_abs_vorticity: 1000.0
+          max_cfl: 1.0
+          max_energy_residual: 0.05
+          min_ks_pvalue: 0.001
+    outs:
+    - path: reports/validation.json
+      hash: md5
+      md5: 582a8d6c2cfa84a9f6b57ad87c773eb5
+      size: 1794797
+  report:
+    cmd: python -m spectral.flow.pipeline report --data data/flow.zarr 
+      --validation reports/validation.json --out reports
+    deps:
+    - path: data/flow.zarr
+      hash: md5
+      md5: a5c1d680ef45ee236843d8be648d9210.dir
+      size: 2147566260
+      nfiles: 74
+    - path: python/spectral/flow/pipeline.py
+      hash: md5
+      md5: 3c9d0303ac2ae1b885296c1d1673d53d
+      size: 8586
+    - path: reports/validation.json
+      hash: md5
+      md5: 582a8d6c2cfa84a9f6b57ad87c773eb5
+      size: 1794797
+    outs:
+    - path: reports/DATASET_CARD.md
+      hash: md5
+      md5: f62d28bdbbf751ab44a284cef75cf3de
+      size: 2017
+    - path: reports/samples.png
+      hash: md5
+      md5: 1c228e03cb7df367c8998d10dbb7c552
+      size: 861828

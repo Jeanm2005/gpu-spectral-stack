@@ -1,0 +1,35 @@
+# Parameters of the data pipeline (dvc.yaml). `dvc repro` regenerates whatever a change here
+# affects; dvc.lock records the resulting dataset's content hash. Field meanings:
+# python/spectral/flow/generate.py (dataset), store.py (layout), validate.py (validation).
+
+dataset:
+  n: 128                    # resolves the dissipation range down to nu = 1e-3 (docs/DATA.md)
+  dt: 0.0025
+  record_every: 40          # a frame every 0.1 time units
+  frames: 32                # a multiple of layout.chunk_frames: no padded chunk
+  spinup_steps: 2000        # 5 time units: past the initial transient
+  num_samples: 1024
+  seed: 0
+  viscosity_min: 1.0e-3
+  viscosity_max: 5.0e-3
+  drag: 0.1
+  forcing_amplitude: 1.0
+  forcing_wavenumber: 4
+  ic_alpha: 2.5
+  ic_tau: 7.0
+  ic_rms: 5.0
+  backend: gpu
+  fft_impl: stockham_r8
+  pruned: true
+  batch_size: 256
+
+layout:
+  chunk_frames: 8
+  samples_per_shard: 16
+  compression: false
+
+validation:
+  max_abs_vorticity: 1000.0
+  max_cfl: 1.0
+  max_energy_residual: 0.05
+  min_ks_pvalue: 0.001

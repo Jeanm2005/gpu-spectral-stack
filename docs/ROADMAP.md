@@ -44,21 +44,21 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
 
 ## Phase 2: Physics solver and data pipeline (January)
 
-- [ ] 2.1 NumPy reference solver (float64, CPU): ground truth that also runs in CI
-- [ ] 2.2 GPU pseudo-spectral 2D Navier–Stokes (vorticity form) on our rfft2: 2/3-rule
+- [X] 2.1 NumPy reference solver (float64, CPU): ground truth that also runs in CI
+- [X] 2.2 GPU pseudo-spectral 2D Navier–Stokes (vorticity form) on our rfft2: 2/3-rule
       dealiasing, Kolmogorov forcing, RK4 or IMEX time stepping. Validation: Taylor–Green
       exact decay, energy/enstrophy budget, agreement with 2.1
-- [ ] 2.3 Batched generation: many trajectories per launch, Gaussian-random-field initial
+- [X] 2.3 Batched generation: many trajectories per launch, Gaussian-random-field initial
       conditions, config → hash + seed recorded for every sample
-- [ ] 2.4 Storage: sharded Zarr, metadata schema (resolution, dt, viscosity, seed, git commit),
+- [X] 2.4 Storage: sharded Zarr, metadata schema (resolution, dt, viscosity, seed, git commit),
       chunk-size study measured against training reads
-- [ ] 2.5 Validation stage: NaN/blowup, energy drift, parameter-distribution report; a bad
+- [X] 2.5 Validation stage: NaN/blowup, energy drift, parameter-distribution report; a bad
       dataset fails the pipeline
-- [ ] 2.6 Versioning: DVC pipeline (generate → validate → report), DVC remote, `dvc repro`
+- [X] 2.6 Versioning: DVC pipeline (generate → validate → report), DVC remote, `dvc repro`
       as the one command
-- [ ] 2.7 Loader: streaming Dataset, pinned memory, prefetching; GPU idle time measured with
+- [X] 2.7 Loader: streaming Dataset, pinned memory, prefetching; GPU idle time measured with
       the PyTorch profiler
-- [ ] 2.8 Throughput report: sims/s, write MB/s, loader samples/s
+- [X] 2.8 Throughput report: sims/s, write MB/s, loader samples/s
 
 MLOps/CI added: a tiny pipeline config (32×32, a few trajectories, NumPy backend) runs end to
 end in CI through `dvc repro`; schema checks; a dataset card generated per version.

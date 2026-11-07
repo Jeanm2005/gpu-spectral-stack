@@ -70,12 +70,18 @@ jobs:
     env:
       TORCH_CUDA_ARCH_LIST: "12.0"  # no GPU to detect, so name the target explicitly
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Python and build tools
+      # git first: without it actions/checkout downloads a tarball with no .git, and DVC and
+      # the dataset metadata (which records the commit) need a real clone.
+      - name: Install Python, build tools, and git
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends python3 python3-venv python3-dev g++
+          apt-get install -y --no-install-recommends python3 python3-venv python3-dev g++ \
+            git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Let git work in the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       # Each step runs in a new shell, so the venv goes on PATH instead of being activated.
       - name: Create the virtual environment
@@ -94,6 +100,14 @@ jobs:
 
       - name: Run the tests (GPU tests skip)
         run: pytest -q
+
+      # The whole data pipeline (generate -> validate -> report) on a CI-sized config: a few
+      # 32 x 32 trajectories through the float64 NumPy solver. Fails if validation fails.
+      - name: Data pipeline end to end (dvc repro)
+        run: |
+          cp configs/ci-params.yaml params.yaml
+          dvc repro
+          cat reports/DATASET_CARD.md
 
   results:
     name: Figures and README tables from the committed results
