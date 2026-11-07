@@ -58,7 +58,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
       as the one command
 - [X] 2.7 Loader: streaming Dataset, pinned memory, prefetching; GPU idle time measured with
       the PyTorch profiler
-- [ ] 2.8 Throughput report: sims/s, write MB/s, loader samples/s
+- [X] 2.8 Throughput report: sims/s, write MB/s, loader samples/s
 
 MLOps/CI added: a tiny pipeline config (32×32, a few trajectories, NumPy backend) runs end to
 end in CI through `dvc repro`; schema checks; a dataset card generated per version.

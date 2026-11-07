@@ -1,0 +1,89 @@
+{
+ "device": "NVIDIA GeForce RTX 5080 Laptop GPU",
+ "dataset_config": {
+  "n": 128,
+  "dt": 0.0025,
+  "record_every": 40,
+  "frames": 32,
+  "spinup_steps": 2000,
+  "num_samples": 1024,
+  "seed": 0,
+  "viscosity_min": 0.001,
+  "viscosity_max": 0.005,
+  "drag": 0.1,
+  "forcing_amplitude": 1.0,
+  "forcing_wavenumber": 4,
+  "ic_alpha": 2.5,
+  "ic_tau": 7.0,
+  "ic_rms": 5.0,
+  "backend": "gpu",
+  "fft_impl": "stockham_r8",
+  "pruned": true,
+  "batch_size": 256
+ },
+ "simulation": [
+  {
+   "fft_impl": "cufft",
+   "pruned": false,
+   "trajectories": 256,
+   "steps_per_trajectory": 3240,
+   "seconds": 16.379,
+   "trajectories_per_s": 15.63,
+   "trajectory_steps_per_s": 50641
+  },
+  {
+   "fft_impl": "cufft",
+   "pruned": true,
+   "trajectories": 256,
+   "steps_per_trajectory": 3240,
+   "seconds": 14.306,
+   "trajectories_per_s": 17.89,
+   "trajectory_steps_per_s": 57976
+  },
+  {
+   "fft_impl": "stockham_r8",
+   "pruned": false,
+   "trajectories": 256,
+   "steps_per_trajectory": 3240,
+   "seconds": 13.371,
+   "trajectories_per_s": 19.15,
+   "trajectory_steps_per_s": 62034
+  },
+  {
+   "fft_impl": "stockham_r8",
+   "pruned": true,
+   "trajectories": 256,
+   "steps_per_trajectory": 3240,
+   "seconds": 7.632,
+   "trajectories_per_s": 33.54,
+   "trajectory_steps_per_s": 108682
+  }
+ ],
+ "write": {
+  "mb": 2147,
+  "seconds": 2.242,
+  "mb_per_s": 957.7
+ },
+ "loader": [
+  {
+   "workers": 0,
+   "windows_per_s": 226.6,
+   "mb_per_s": 163.4
+  },
+  {
+   "workers": 2,
+   "windows_per_s": 2933.3,
+   "mb_per_s": 2114.6
+  },
+  {
+   "workers": 4,
+   "windows_per_s": 3585.8,
+   "mb_per_s": 2585.0
+  },
+  {
+   "workers": 8,
+   "windows_per_s": 3351.6,
+   "mb_per_s": 2416.2
+  }
+ ]
+}

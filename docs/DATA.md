@@ -176,3 +176,45 @@ Findings, and the defaults they set:
 - **Make the frame count a multiple of the chunk.** At 41 frames the sixth 8-frame chunk holds
   one real frame and seven padding frames, which is why that layout takes 201 MB instead of 172.
 - These are single-thread reads; the loader of Task 2.7 reads with several workers.
+
+## Throughput
+
+`python tools/throughput_report.py --out docs/results/throughput.json`, for the dataset of
+params.yaml (128², batches of 256 trajectories of 3240 solver steps: 2000 of spin-up, then 31
+intervals of 40), on the charger with the GPU clock locked.
+
+**Simulation**, one batch of 256 trajectories from initial condition to last frame:
+
+| FFT | Layout | Trajectories/s | Trajectory-steps/s | vs cuFFT, full |
+|---|---|---:|---:|---:|
+| cuFFT (torch.fft) | full | 15.6 | 50,600 | 1.00x |
+| cuFFT (torch.fft) | pruned | 17.9 | 58,000 | 1.15x |
+| `stockham_r8` | full | 19.2 | 62,000 | 1.23x |
+| **`stockham_r8`** | **pruned** | **33.5** | **108,700** | **2.15x** |
+
+The pruned layout keeps only the modes the 2/3 rule keeps (Task 1.7): our pruned transforms
+then move about 44 % of the full spectrum, while cuFFT can only compute the full transform and
+gather, so pruning gains it little. With our kernels the 1024-trajectory dataset takes 31 s of
+simulation.
+
+**Writing**: finished batches into a new store, synced to disk: **958 MB/s** (2.1 GB in 2.2 s).
+Writing is a few percent of the generation time.
+
+**Loading**, the training loader alone (no GPU work), page cache dropped first:
+
+| Workers | Windows/s | Window data delivered |
+|---:|---:|---:|
+| 0 | 227 | 163 MB/s |
+| 2 | 2,933 | 2.1 GB/s |
+| 4 | 3,586 | 2.6 GB/s |
+| 8 | 3,352 | 2.4 GB/s |
+
+A window is 11 frames of 64 KiB. Consecutive windows of a trajectory share 10 of their frames,
+and the loader reads a shard once and cuts all its windows from memory, so "delivered" counts
+reused data: the disk reads each byte once per epoch. One epoch of the dataset (22,528 windows
+of 10 in, 1 out) takes about 6 s of loading at 4 workers.
+
+Generation and loading are not what limits the work that follows: a full dataset regenerates in
+under a minute of GPU time (3 minutes with validation and the card, `dvc repro`), and the loader
+keeps a GPU busy once a training step takes more than about 7 ms per batch of 32 (the profile
+above).
