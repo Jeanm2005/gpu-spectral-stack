@@ -19,8 +19,10 @@ pytestmark = pytest.mark.gpu  # every test here runs our kernels
 
 IMPLS = spectral.FFT_IMPLS
 SIZES = [1, *POW2_SIZES]
-# The single-block kernels hold one transform in shared memory, up to 4096 points.
+# One Stockham kernel holds a transform in shared memory, up to 4096 points; beyond that the
+# four-step algorithm takes over (Task 1.4), up to 4096^2 = 2^24 points.
 SIZE_LIMITED = [impl for impl in IMPLS if impl.startswith("stockham")]
+LARGE_SIZES = [8192, 1 << 16, 1 << 20]
 
 
 def run(x: np.ndarray, *, inverse: bool = False, impl: str) -> np.ndarray:
@@ -61,6 +63,55 @@ def test_batches_that_do_not_fill_the_last_block(rng, impl, batch):
     # Small sizes pack many transforms into one block; these batch counts leave a partial block.
     x = random_complex(rng, (batch, 8))
     assert_transform_close(run(x, impl=impl), ref.fft(x), 8)
+
+
+# --- Beyond one block: the four-step algorithm (Task 1.4) ------------------------------------
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+@pytest.mark.parametrize("batch", [1, 2])
+@pytest.mark.parametrize("n", LARGE_SIZES)
+def test_large_forward_matches_the_reference(rng, impl, n, batch):
+    x = random_complex(rng, (batch, n))
+    assert_transform_close(run(x, impl=impl), ref.fft(x), n)
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+@pytest.mark.parametrize("batch", [1, 2])
+@pytest.mark.parametrize("n", LARGE_SIZES)
+def test_large_inverse_matches_the_reference(rng, impl, n, batch):
+    x = random_complex(rng, (batch, n))
+    assert_transform_close(run(x, inverse=True, impl=impl), ref.ifft(x), n)
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+def test_largest_size(rng, impl):
+    n = 1 << 24  # 4096 x 4096: both the column and the row transforms are 4096 points
+    x = random_complex(rng, (1, n))
+    assert_transform_close(run(x, impl=impl), ref.fft(x), n)
+
+
+@pytest.mark.parametrize("impl", IMPLS)
+def test_large_single_frequency_lands_in_one_bin(impl):
+    # A wrong transpose or twiddle index moves the peak; a random input would only blur it.
+    n, k0 = 1 << 20, 12345
+    m = np.arange(n)
+    x = np.exp(2j * np.pi * k0 * m / n).astype(np.complex64)[None, :]
+    expected = np.zeros((1, n), dtype=np.complex128)
+    expected[0, k0] = n
+    assert_transform_close(run(x, impl=impl), expected, n)
+
+
+@pytest.mark.parametrize("impl", SIZE_LIMITED)
+def test_large_transform_on_a_side_stream(rng, impl):
+    # The four-step workspace is allocated and freed in stream order, on the caller's stream.
+    x = torch.from_numpy(random_complex(rng, (2, 1 << 16))).cuda()
+    side = torch.cuda.Stream()
+    side.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(side):
+        y = spectral.fft_c2c(x, impl=impl)
+    side.synchronize()
+    assert_transform_close(y, ref.fft(x.cpu().numpy()), 1 << 16)
 
 
 # --- Known answers ----------------------------------------------------------------------------
@@ -119,8 +170,8 @@ def test_rejects_a_size_that_is_not_a_power_of_two(impl):
 
 @pytest.mark.parametrize("impl", SIZE_LIMITED)
 def test_rejects_a_size_above_the_implementation_limit(impl):
-    x = torch.zeros(2, 8192, dtype=torch.complex64, device="cuda")
-    with pytest.raises(RuntimeError, match="sizes up to 4096"):
+    x = torch.empty(1, 1 << 25, dtype=torch.complex64, device="cuda")  # 256 MiB, never read
+    with pytest.raises(RuntimeError, match="sizes up to 16777216"):
         spectral.fft_c2c(x, impl=impl)
 
 

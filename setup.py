@@ -30,6 +30,7 @@ SOURCES = [
     "csrc/fft/stockham_r8.cu",
     "csrc/fft/stockham_r8_table.cu",
     "csrc/fft/twiddles.cu",
+    "csrc/fft/fourstep.cu",
 ]
 
 setup(

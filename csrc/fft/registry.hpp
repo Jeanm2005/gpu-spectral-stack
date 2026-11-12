@@ -18,23 +18,25 @@ struct FftImpl {
     C2rFn c2r;
     ColumnsFn columns;        // strided column transforms, or nullptr (2D then transposes)
     const PrunedFns* pruned;  // pruning inside the kernels, or nullptr (pruned.cu gathers)
-    int max_n;                // largest complex transform
+    int max_n;                // largest complex transform in a single kernel (2D, pruned)
+    int max_c2c_n;            // largest 1D complex transform (c2c, four-step beyond max_n)
     int max_real_n;           // largest real transform
     bool real_needs_work;     // r2c and c2r need the `work` buffer (no fused kernel)
 };
 
 // In the order they were written.
 inline constexpr FftImpl kFftImpls[] = {
-    {"naive", &c2c_naive, &r2c_naive, &c2r_naive, nullptr, nullptr, 1 << 30, 1 << 30, true},
+    {"naive", &c2c_naive, &r2c_naive, &c2r_naive, nullptr, nullptr, 1 << 30, 1 << 30, 1 << 30,
+     true},
     {"stockham_r2", &c2c_stockham_r2, &r2c_stockham_r2, &c2r_stockham_r2, &columns_stockham_r2,
-     &pruned_stockham_r2, kStockhamMaxN, 2 * kStockhamMaxN, false},
+     &pruned_stockham_r2, kStockhamMaxN, kFourStepMaxN, 2 * kStockhamMaxN, false},
     {"stockham_r4", &c2c_stockham_r4, &r2c_stockham_r4, &c2r_stockham_r4, &columns_stockham_r4,
-     &pruned_stockham_r4, kStockhamMaxN, 2 * kStockhamMaxN, false},
+     &pruned_stockham_r4, kStockhamMaxN, kFourStepMaxN, 2 * kStockhamMaxN, false},
     {"stockham_r8", &c2c_stockham_r8, &r2c_stockham_r8, &c2r_stockham_r8, &columns_stockham_r8,
-     &pruned_stockham_r8, kStockhamMaxN, 2 * kStockhamMaxN, false},
+     &pruned_stockham_r8, kStockhamMaxN, kFourStepMaxN, 2 * kStockhamMaxN, false},
     {"stockham_r8_table", &c2c_stockham_r8_table, &r2c_stockham_r8_table,
      &c2r_stockham_r8_table, &columns_stockham_r8_table, &pruned_stockham_r8_table,
-     kStockhamMaxN, 2 * kStockhamMaxN, false},
+     kStockhamMaxN, kFourStepMaxN, 2 * kStockhamMaxN, false},
 };
 
 // The implementation called `name`, or nullptr if there is none.
