@@ -94,7 +94,7 @@ at::Tensor fft_c2c_cuda(const at::Tensor& x, bool inverse, c10::string_view impl
     const int64_t n = x.size(-1);
     TORCH_CHECK((n & (n - 1)) == 0, "fft_c2c: the last dimension must be a power of two, got ",
                 n);
-    TORCH_CHECK(n <= impl.max_n, "fft_c2c: ", impl.name, " supports sizes up to ", impl.max_n,
+    TORCH_CHECK(n <= impl.max_c2c_n, "fft_c2c: ", impl.name, " supports sizes up to ", impl.max_c2c_n,
                 ", got ", n);
     const int batch = batch_of(x, n, "fft_c2c");
 

@@ -1,6 +1,8 @@
 // Stockham FFT, radix 2, twiddles computed with sincospif.
-// The kernels themselves are in stockham.cuh.
+// The kernels themselves are in stockham.cuh; complex sizes above 4096 use the four-step
+// algorithm in fourstep.cuh.
 
+#include "fft/fourstep.cuh"
 #include "fft/stockham.cuh"
 
 namespace spectral::fft {
@@ -8,7 +10,7 @@ namespace spectral::fft {
 void c2c_stockham_r2(const cf32* x, cf32* y, int n, int batch, Direction direction,
                      cudaStream_t stream)
 {
-    stockham::c2c<2, false>(x, y, n, batch, direction, stream);
+    fourstep::c2c<2, false>(x, y, n, batch, direction, stream);
 }
 
 void r2c_stockham_r2(const float* x, cf32* y, int n, int batch, cf32* /*work*/, cudaStream_t stream)

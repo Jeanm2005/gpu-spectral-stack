@@ -10,7 +10,7 @@ Conventions
 - Every kernel variant stays selectable, so each optimization is measured against the one
   before it.
 
-## Phase 0: Foundations (Nov 2–15)
+## Phase 0: Foundations
 
 - [X] 0.1 Build skeleton: CMake, `spectral_core` library, toolchain smoke test, CI build job
 - [X] 0.2 PyTorch extension: `spectral._C` built with torch.utils.cpp_extension, pyproject.toml,
@@ -24,12 +24,12 @@ Conventions
 - [X] 0.5 Roofline tooling: measured peak bandwidth (copy kernel) and peak FP32 (FMA kernel),
       Nsight Compute script, roofline plot, DEVELOPMENT.md trimmed to this repo
 
-## Phase 1: FFT kernels (Nov 16 – early Jan)
+## Phase 1: FFT kernels
 
 - [X] 1.1 Naive batched radix-2 Cooley–Tukey, complex-to-complex (C2C), forward and inverse
 - [X] 1.2 Stockham radix-2 in shared memory, one block per transform (N ≤ 4096)
 - [X] 1.3 Radix-4 and mixed radix 2/4/8; twiddle factors from a table vs computed on the fly
-- [ ] 1.4 (optional) Multi-block FFT for N beyond shared memory (four-step algorithm)
+- [X] 1.4 (optional) Multi-block FFT for N beyond shared memory (four-step algorithm)
 - [X] 1.5 Real-to-complex (R2C) and complex-to-real (C2R) through the N/2-point complex trick
 - [X] 1.6 2D FFT: row transforms then column transforms (transpose vs strided), rfft2/irfft2
 - [X] 1.7 Pruned transforms: forward that outputs only the first k modes, inverse that
@@ -42,7 +42,7 @@ Conventions
 CI added in this phase: build for every target architecture, CPU tests of the reference and
 of the tolerance policy, Nsight reports and figures regenerated from committed data.
 
-## Phase 2: Physics solver and data pipeline (January)
+## Phase 2: Physics solver and data pipeline
 
 - [X] 2.1 NumPy reference solver (float64, CPU): ground truth that also runs in CI
 - [X] 2.2 GPU pseudo-spectral 2D Navier–Stokes (vorticity form) on our rfft2: 2/3-rule
@@ -63,7 +63,7 @@ of the tolerance policy, Nsight reports and figures regenerated from committed d
 MLOps/CI added: a tiny pipeline config (32×32, a few trajectories, NumPy backend) runs end to
 end in CI through `dvc repro`; schema checks; a dataset card generated per version.
 
-## Phase 3: Custom neural-operator layer (February–March)
+## Phase 3: Custom neural-operator layer
 
 - [ ] 3.1 Training harness: YAML configs, MLflow tracking (params, metrics, artifacts, DVC
       dataset hash, git commit), seeding, checkpoints
@@ -79,7 +79,7 @@ end in CI through `dvc repro`; schema checks; a dataset card generated per versi
 MLOps/CI added: CPU tests of the layer through the torch.fft path, a one-epoch tiny training
 smoke test on CPU, MLflow logging tested against a temporary file store.
 
-## Phase 4: Write-up (first week of April)
+## Phase 4: Write-up
 
 - [ ] README and blog post: radio → physics → learned operator, gradient derivation, Nsight
       evidence, an honest section on what didn't speed up and why

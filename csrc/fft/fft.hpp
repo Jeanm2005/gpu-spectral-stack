@@ -16,6 +16,9 @@ namespace spectral::fft {
 
     void c2c_naive(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);
     constexpr int kStockhamMaxN = 4096;
+    // Complex transforms beyond one block's shared memory use the four-step algorithm
+    // (fourstep.cuh, Task 1.4), up to kStockhamMaxN^2 points.
+    constexpr int kFourStepMaxN = kStockhamMaxN * kStockhamMaxN;
     void c2c_stockham_r2(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);
     void c2c_stockham_r4(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);
     void c2c_stockham_r8(const cf32* x, cf32* y, int n, int batch, Direction direction, cudaStream_t stream);

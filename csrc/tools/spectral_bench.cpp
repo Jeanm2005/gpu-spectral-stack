@@ -279,7 +279,7 @@ void bench_fft_c2c(const Options& options, const cf32* x, cf32* y, cudaStream_t 
         }
 
         for (const spectral::fft::FftImpl& impl : spectral::fft::kFftImpls) {
-            if (!options.wants(impl.name) || n > impl.max_n) {
+            if (!options.wants(impl.name) || n > impl.max_c2c_n) {
                 continue;
             }
             const Timing t = time_kernel(
