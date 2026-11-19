@@ -1,20 +1,19 @@
-# Build outputs
 build/
 out/
 *.so
 *.egg-info/
-
-# Python
 .venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
-
-# Data and experiment tracking (DVC and MLflow manage these from Phase 2)
 data/
 mlruns/
 mlartifacts/
-
-# Large or intermediate profiler files (small .ncu-rep reports are committed)
+runs/
+mlflow.db
 *.qdstrm
 *.sqlite
+
+# personal notes, kept locally only
+docs/ROADMAP.md
+docs/DEVELOPMENT.md

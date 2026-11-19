@@ -10,7 +10,7 @@
 #
 #   ncu --import docs/profiles/fft_c2c_naive_1024.ncu-rep --page details --section SpeedOfLight
 #
-# Under WSL2, ncu needs GPU performance counters enabled on Windows: see docs/DEVELOPMENT.md.
+# Under WSL2, ncu needs GPU performance counters enabled on Windows: see docs/PROFILING.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

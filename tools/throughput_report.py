@@ -11,7 +11,7 @@ samples per second, for the dataset params.yaml describes.
     loader      the training loader on the stored dataset after dropping its page cache, at
                 several worker counts with no GPU work: windows per second and MB/s
 
-Measure on the charger with the GPU clock locked (docs/DEVELOPMENT.md).
+Measure on the charger with the GPU clock locked (docs/results/README.md).
 """
 
 from __future__ import annotations

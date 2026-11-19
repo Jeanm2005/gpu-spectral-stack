@@ -17,7 +17,7 @@
 // is the full transform plus our gather (or scatter) of the modes: "cufft+gather".
 //
 // A row whose slowest round is more than 5 % slower than its fastest gets a warning on stderr:
-// on this laptop that almost always means the GPU clock is not locked (docs/DEVELOPMENT.md).
+// on this laptop that almost always means the GPU clock is not locked (docs/results/README.md).
 
 #include "common/bench.hpp"
 #include "common/check.hpp"
@@ -564,7 +564,7 @@ int main(int argc, char** argv)
         if (unstable_rows > 0) {
             std::fprintf(stderr,
                          "warning: %d unstable row(s); lock the GPU clock before trusting these "
-                         "numbers (docs/DEVELOPMENT.md, Benchmarks)\n",
+                         "numbers (docs/results/README.md, Benchmark checklist)\n",
                          unstable_rows);
         }
         return 0;

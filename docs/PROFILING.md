@@ -1,7 +1,7 @@
 # Profiling log
 
 What Nsight Compute showed about each kernel, case by case. The reports are in docs/profiles/
-(`tools/profile_kernels.sh` regenerates them; docs/DEVELOPMENT.md has the setup). Every case is a
+(`tools/profile_kernels.sh` regenerates them; the setup is below. Every case is a
 single launch of 2^24 points, the same work as one row of docs/results/bench.csv.
 
 Conditions: RTX 5080 Laptop GPU, CUDA 13.4, core clock locked at 1200 MHz (see
@@ -14,6 +14,21 @@ SM is `sm__throughput` (the busiest of the SM's pipelines, % of peak); occupancy
 active warps (% of peak); bank conflicts are extra shared-memory wavefronts on loads / stores;
 sectors per request is 32-byte sectors per global-load request, where 8.0 means each warp reads
 256 contiguous bytes (one cf32 per thread) and anything above it means scattered reads.
+
+## Setup
+
+Under WSL2, the GPU performance counters must first be enabled on Windows: NVIDIA Control Panel →
+Desktop menu → Enable Developer Settings, then Developer → Manage GPU Performance Counters →
+"Allow access to the GPU performance counters to all users". Without it, `ncu` reports
+`ERR_NVGPUCTRPERM`.
+
+```bash
+tools/profile_kernels.sh                        # default cases
+tools/profile_kernels.sh fft_c2c naive 1024     # one case
+```
+
+`--set full` replays each kernel dozens of times, so a run takes a while. Device code is built
+with `-lineinfo`, so a report's Source page maps stalls to lines of our kernels.
 
 ## 1D complex, N = 4096 (Tasks 1.1-1.3)
 

@@ -12,3 +12,4 @@ pyyaml
 ninja
 setuptools>=77
 wheel
+mlflow>=3

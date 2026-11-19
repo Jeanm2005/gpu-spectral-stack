@@ -1,0 +1,38 @@
+# The baseline FNO (Task 3.2): Li et al.'s 2D time-stepping architecture on the Phase 2 dataset,
+# with the spectral convolution on torch.fft. Every later task changes model.backend (and the
+# kernels behind it) and nothing else, so its runs compare against this one directly.
+#
+#   python -m spectral.fno.train --config configs/fno/baseline.yaml
+
+run_name: fno-baseline-torch
+seed: 0
+
+data:
+  path: data/flow.zarr
+  inputs: 10                 # 10 frames in, 1 out: Li et al.'s Navier-Stokes setup
+  outputs: 1
+  test_samples: 128          # of 1024 trajectories: 896 train (19,712 windows), 128 test
+  num_workers: 4
+
+model:
+  modes: 12                  # 24 x 12 kept modes of the 128 x 65 rfft2 grid
+  width: 32
+  layers: 4
+  projection: 128
+  backend: torch
+
+train:
+  epochs: 50
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  device: cuda
+  resume: false
+
+tracking:
+  backend: mlflow            # browse with: mlflow ui --backend-store-uri sqlite:///runs/mlflow.db
+  experiment: fno
+  uri: null                  # MLFLOW_TRACKING_URI if set, else sqlite:///runs/mlflow.db
+
+checkpoint:
+  dir: runs/checkpoints

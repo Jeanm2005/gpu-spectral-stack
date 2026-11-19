@@ -14,7 +14,7 @@ its start and length: busy = time covered by at least one of them, idle = 1 - bu
 start to last end), over the profiled steps. Busy time per step is in absolute milliseconds,
 so it shows when the GPU itself ran slower (a clock that is not locked) rather than idled.
 
-Measure on the charger with the clock locked (docs/DEVELOPMENT.md); on battery the GPU clock
+Measure on the charger with the clock locked (docs/results/README.md); on battery the GPU clock
 collapses and every number here changes.
 """
 

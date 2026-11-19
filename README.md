@@ -5,7 +5,7 @@ that generates versioned training data, and a custom PyTorch spectral-convolutio
 Fourier Neural Operator.
 
 Builds on [gpu-rf-pipeline](https://github.com/Jeanm2005/gpu-rf-pipeline), which provides the
-radio signal-processing side. Status and plan: [docs/ROADMAP.md](docs/ROADMAP.md).
+radio signal-processing side.
 
 ## What is here (Phase 1: FFT kernels)
 
@@ -288,4 +288,4 @@ pip install -e . --no-build-isolation
 pytest -q -rs
 ```
 
-Day-to-day workflow, tests, benchmarks, and profiling: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Benchmark conditions and the full results refresh: [docs/results/README.md](docs/results/README.md). Profiling setup and findings: [docs/PROFILING.md](docs/PROFILING.md).
